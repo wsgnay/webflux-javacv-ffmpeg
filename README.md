@@ -47,6 +47,7 @@ src/
    - 视频分割
    - 视频合并
    - 可选转场效果
+   - 关键帧提取和分析
 
 4. 视频缩略图功能：
    - 支持从视频任意时间点截取帧
@@ -215,7 +216,9 @@ Content-Type: application/json
 {
     "inputPath": "/path/to/input.mp4",
     "outputDir": "/path/to/keyframes/",
-    "extractImages": false
+    "extractImages": true,
+    "imageFormat": "jpg",
+    "imageQuality": 95
 }
 ```
 
@@ -231,9 +234,52 @@ Content-Type: application/json
 - `keyframes`: 关键帧信息列表，每个元素包含：
   - `timestamp`: 关键帧时间戳（秒）
   - `frameNumber`: 帧序号
-  - `type`: 帧类型（I/P/B）
+  - `type`: 帧类型（I帧）
   - `imagePath`: 图片路径（仅当extractImages为true时返回）
 - `error`: 错误信息（如果失败）
+
+使用示例：
+```bash
+# 只获取关键帧信息
+curl -X POST "http://localhost:8080/api/media/clip/keyframes" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputPath": "/path/to/video.mp4",
+    "extractImages": false
+  }'
+
+# 获取关键帧信息并保存图片
+curl -X POST "http://localhost:8080/api/media/clip/keyframes" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputPath": "/path/to/video.mp4",
+    "outputDir": "/path/to/keyframes/",
+    "extractImages": true,
+    "imageFormat": "jpg",
+    "imageQuality": 95
+  }'
+```
+
+返回示例：
+```json
+{
+    "success": true,
+    "keyframes": [
+        {
+            "timestamp": 0.0,
+            "frameNumber": 0,
+            "type": "I",
+            "imagePath": "/path/to/keyframes/keyframe_0.jpg"
+        },
+        {
+            "timestamp": 8.333333,
+            "frameNumber": 250,
+            "type": "I",
+            "imagePath": "/path/to/keyframes/keyframe_250.jpg"
+        }
+    ]
+}
+```
 
 ### 4. 生成视频缩略图
 
@@ -308,6 +354,16 @@ Content-Type: application/json
 - 可选添加转场效果
 - 建议使用相同格式和编码的视频
 - 注意合并大文件时的内存使用
+
+### 关键帧提取
+- 支持提取视频中的所有关键帧（I帧）
+- 可选择是否保存关键帧图片
+- 支持JPG和PNG格式输出
+- 提供关键帧的精确时间戳和帧号
+- 适用于视频分析和预览
+- 可用于优化无损剪辑的切分点选择
+- 自动创建输出目录（当需要保存图片时）
+- 支持自定义图片质量参数
 
 ## 注意事项
 
