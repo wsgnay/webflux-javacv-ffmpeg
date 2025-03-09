@@ -1,0 +1,16 @@
+server:
+  port: 8080
+  
+spring:
+  application:
+    name: ffmpeg-service
+  codec:
+    max-in-memory-size: 10MB  # WebFlux 中的最大内存缓冲区大小
+    
+logging:
+  level:
+    root: INFO
+    com.example.ffmpeg: DEBUG
+    org.springframework.web: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n" 
