@@ -1,6 +1,6 @@
 # Java FFmpeg 视频处理服务
 
-这是一个基于 Spring Boot 和 JavaCV 的视频处理服务，提供视频信息获取和转码功能。
+这是一个基于 Spring Boot 和 JavaCV 的视频处理服务，提供视频信息获取、转码和缩略图生成功能。
 
 ## 环境要求
 
@@ -16,6 +16,7 @@ src/
 │   └── com/example/ffmpeg/
 │       ├── controller/          # REST API 控制器
 │       ├── service/            # 业务逻辑服务
+│       ├── dto/               # 数据传输对象
 │       └── util/
 │           └── FFmpegUtil.java # FFmpeg 工具类
 └── test/java/
@@ -39,6 +40,12 @@ src/
    - 自定义输出分辨率
    - 自定义输出比特率
    - 自动保持音频质量
+
+3. 视频缩略图功能：
+   - 支持从视频任意时间点截取帧
+   - 自定义输出图片尺寸
+   - 支持 JPEG 格式输出
+   - 自动创建输出目录
 
 ## API 文档
 
@@ -87,6 +94,36 @@ Content-Type: application/json
 - `resolution`: 目标分辨率（可选，格式如 "1280x720"）
 - `bitrate`: 目标比特率（可选，支持如 "2M" 或 "2000k"）
 
+### 3. 生成视频缩略图
+
+```http
+POST http://localhost:8080/api/media/thumbnail
+Content-Type: application/json
+
+{
+    "videoPath": "/path/to/video.mp4",
+    "outputPath": "/path/to/thumbnail.jpg",
+    "timestamp": 5.0,
+    "width": 320,
+    "height": 240
+}
+```
+
+参数说明：
+- `videoPath`: 输入视频文件路径（必填）
+- `outputPath`: 输出缩略图路径（必填）
+- `timestamp`: 截取时间点，单位秒（必填）
+- `width`: 缩略图宽度（可选，默认保持原视频宽度）
+- `height`: 缩略图高度（可选，默认保持原视频高度）
+
+返回示例：
+```json
+{
+    "success": true,
+    "thumbnailPath": "/path/to/thumbnail.jpg"
+}
+```
+
 ## 使用方法
 
 1. 克隆项目到本地
@@ -118,6 +155,17 @@ Content-Type: application/json
        "resolution": "1280x720",
        "bitrate": "2M"
      }'
+
+   # 生成缩略图
+   curl -X POST "http://localhost:8080/api/media/thumbnail" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "videoPath": "/path/to/video.mp4",
+       "outputPath": "/path/to/thumbnail.jpg",
+       "timestamp": 5.0,
+       "width": 320,
+       "height": 240
+     }'
    ```
 
 ## 注意事项
@@ -126,4 +174,6 @@ Content-Type: application/json
 - 支持大多数常见视频格式（mp4, avi, mkv等）
 - 转码时请确保有足够的磁盘空间
 - 建议在服务器环境使用时增加适当的访问控制
+- 生成缩略图时，timestamp不应超过视频总时长
+- 建议使用绝对路径以避免路径解析问题
 
