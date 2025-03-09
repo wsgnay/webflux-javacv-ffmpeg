@@ -1,5 +1,9 @@
 package com.example.ffmpeg.service;
 
+import reactor.core.publisher.Mono;
+import java.util.List;
+import java.util.Map;
+
 public interface ClipService {
     /**
      * 剪辑视频
@@ -42,4 +46,6 @@ public interface ClipService {
      * @return 输出视频路径
      */
     String losslessClip(String inputPath, String outputPath, double startTime, double duration) throws Exception;
+
+    Mono<List<Map<String, Object>>> getKeyframes(String inputPath, String outputDir, boolean extractImages, String imageFormat, int imageQuality);
 } 

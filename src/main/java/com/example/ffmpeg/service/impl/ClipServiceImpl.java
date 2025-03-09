@@ -1,15 +1,27 @@
 package com.example.ffmpeg.service.impl;
 
 import com.example.ffmpeg.service.ClipService;
-import org.bytedeco.javacv.FFmpegFrameGrabber;
-import org.bytedeco.javacv.FFmpegFrameRecorder;
-import org.bytedeco.javacv.Frame;
+import org.bytedeco.javacv.*;
+import org.bytedeco.ffmpeg.avcodec.*;
+import org.bytedeco.ffmpeg.avformat.*;
+import org.bytedeco.ffmpeg.avutil.*;
 import org.springframework.stereotype.Service;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import reactor.core.publisher.Mono;
+
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.bytedeco.ffmpeg.global.avcodec.*;
+import static org.bytedeco.ffmpeg.global.avformat.*;
+import static org.bytedeco.ffmpeg.global.avutil.*;
 
 @Service
 public class ClipServiceImpl implements ClipService {
@@ -259,5 +271,51 @@ public class ClipServiceImpl implements ClipService {
             videoCodecName.toLowerCase().contains("h264") || 
             videoCodecName.toLowerCase().contains("avc")
         );
+    }
+
+    @Override
+    public Mono<List<Map<String, Object>>> getKeyframes(String inputPath, String outputDir, boolean extractImages, String imageFormat, int imageQuality) {
+        return Mono.fromCallable(() -> {
+            List<Map<String, Object>> keyframes = new ArrayList<>();
+            FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(inputPath);
+            grabber.start();
+
+            try {
+                // 如果需要提取图片，创建输出目录
+                if (extractImages && outputDir != null) {
+                    Files.createDirectories(Paths.get(outputDir));
+                }
+
+                Frame frame;
+                int frameNumber = 0;
+                Java2DFrameConverter converter = new Java2DFrameConverter();
+
+                while ((frame = grabber.grab()) != null) {
+                    if (frame.keyFrame) {
+                        Map<String, Object> keyframe = new HashMap<>();
+                        double timestamp = grabber.getTimestamp() / 1000000.0; // 转换为秒
+                        keyframe.put("timestamp", timestamp);
+                        keyframe.put("frameNumber", frameNumber);
+                        keyframe.put("type", "I"); // I帧就是关键帧
+
+                        // 如果需要提取图片
+                        if (extractImages && outputDir != null && frame.image != null) {
+                            String imagePath = String.format("%s/keyframe_%d.%s", outputDir, frameNumber, imageFormat);
+                            BufferedImage image = converter.convert(frame);
+                            ImageIO.write(image, imageFormat, new File(imagePath));
+                            keyframe.put("imagePath", imagePath);
+                        }
+
+                        keyframes.add(keyframe);
+                    }
+                    frameNumber++;
+                }
+            } finally {
+                grabber.stop();
+                grabber.release();
+            }
+
+            return keyframes;
+        });
     }
 } 

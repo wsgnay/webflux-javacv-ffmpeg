@@ -5,6 +5,7 @@ import com.example.ffmpeg.service.ClipService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Mono;
 
 import java.util.HashMap;
 import java.util.List;
@@ -109,5 +110,28 @@ public class ClipController {
             error.put("error", e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
+    }
+
+    @PostMapping("/keyframes")
+    public Mono<Map<String, Object>> getKeyframes(@RequestBody Map<String, Object> request) {
+        String inputPath = (String) request.get("inputPath");
+        String outputDir = (String) request.getOrDefault("outputDir", null);
+        boolean extractImages = (boolean) request.getOrDefault("extractImages", false);
+        String imageFormat = (String) request.getOrDefault("imageFormat", "jpg");
+        int imageQuality = ((Number) request.getOrDefault("imageQuality", 95)).intValue();
+
+        return clipService.getKeyframes(inputPath, outputDir, extractImages, imageFormat, imageQuality)
+                .map(result -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("success", true);
+                    response.put("keyframes", result);
+                    return response;
+                })
+                .onErrorResume(e -> {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("success", false);
+                    response.put("error", e.getMessage());
+                    return Mono.just(response);
+                });
     }
 } 

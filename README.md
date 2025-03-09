@@ -207,6 +207,34 @@ Content-Type: application/json
 - `outputPath`: 输出文件路径
 - `error`: 错误信息（如果失败）
 
+#### 3.5 获取视频关键帧
+```http
+POST http://localhost:8080/api/media/clip/keyframes
+Content-Type: application/json
+
+{
+    "inputPath": "/path/to/input.mp4",
+    "outputDir": "/path/to/keyframes/",
+    "extractImages": false
+}
+```
+
+参数说明：
+- `inputPath`: 输入视频文件路径（必填）
+- `outputDir`: 关键帧图片输出目录（可选，仅当extractImages为true时必填）
+- `extractImages`: 是否提取关键帧图片（可选，默认false）
+- `imageFormat`: 图片格式（可选，支持 "jpg"/"png"，默认"jpg"）
+- `imageQuality`: 图片质量，1-100（可选，默认95）
+
+返回参数：
+- `success`: 是否成功
+- `keyframes`: 关键帧信息列表，每个元素包含：
+  - `timestamp`: 关键帧时间戳（秒）
+  - `frameNumber`: 帧序号
+  - `type`: 帧类型（I/P/B）
+  - `imagePath`: 图片路径（仅当extractImages为true时返回）
+- `error`: 错误信息（如果失败）
+
 ### 4. 生成视频缩略图
 
 ```http
