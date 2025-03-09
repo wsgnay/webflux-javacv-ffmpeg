@@ -72,7 +72,4 @@ bin/
 .TemporaryItems
 .Trashes
 .VolumeIcon.icns
-.com.apple.timemachine.donotpresent
-
-# JMH
-jmh-result.text 
+.com.apple.timemachine.donotpresent 
