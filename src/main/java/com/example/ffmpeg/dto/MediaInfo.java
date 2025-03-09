@@ -1,6 +1,7 @@
 package com.example.ffmpeg.dto;
 
 import lombok.Data;
+import java.util.List;
 
 @Data
 public class MediaInfo {
@@ -10,4 +11,6 @@ public class MediaInfo {
     private String bitrate;
     private String audioCodec;
     private String videoCodec;
+    private List<SubtitleInfo> subtitles;
+    private List<AudioTrackInfo> audioTracks;
 }

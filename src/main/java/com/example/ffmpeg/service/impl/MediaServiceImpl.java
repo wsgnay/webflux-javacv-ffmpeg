@@ -1,6 +1,7 @@
 package com.example.ffmpeg.service.impl;
 
 import com.example.ffmpeg.dto.MediaInfo;
+import com.example.ffmpeg.dto.SubtitleInfo;
 import com.example.ffmpeg.dto.TranscodeRequest;
 import com.example.ffmpeg.service.MediaService;
 import com.example.ffmpeg.util.FFmpegUtil;
@@ -8,6 +9,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -25,6 +29,20 @@ public class MediaServiceImpl implements MediaService {
             mediaInfo.setBitrate(metadata.getBitrate());
             mediaInfo.setAudioCodec(metadata.getAudioCodec());
             mediaInfo.setVideoCodec(metadata.getVideoCodec());
+            
+            // 设置字幕信息
+            if (metadata.getSubtitleStreams() != null) {
+                mediaInfo.setSubtitles(metadata.getSubtitleStreams());
+            } else {
+                mediaInfo.setSubtitles(new ArrayList<>());
+            }
+
+            // 设置音轨信息
+            if (metadata.getAudioTracks() != null) {
+                mediaInfo.setAudioTracks(metadata.getAudioTracks());
+            } else {
+                mediaInfo.setAudioTracks(new ArrayList<>());
+            }
             
             return mediaInfo;
         }).subscribeOn(Schedulers.boundedElastic());

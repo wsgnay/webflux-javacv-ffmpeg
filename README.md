@@ -33,6 +33,7 @@ src/
    - 比特率
    - 视频编解码器
    - 音频编解码器
+   - 字幕轨道信息
 
 2. 视频转码功能：
    - 支持 H.264/H.265 视频编码
@@ -73,6 +74,88 @@ GET http://localhost:8080/api/media/info?filePath={filePath}
 - `bitrate`: 视频比特率（bps）
 - `audioCodec`: 音频编码格式
 - `videoCodec`: 视频编码格式
+- `subtitles`: 字幕轨道信息列表，每个元素包含：
+  - `index`: 字幕轨道索引
+  - `language`: 字幕语言（如果有）
+  - `codec`: 字幕编码格式（如：subrip, ass, mov_text等）
+  - `title`: 字幕标题（如果有）
+  - `default`: 是否为默认字幕轨道
+  - `forced`: 是否为强制字幕轨道
+- `audioTracks`: 音轨信息列表，每个元素包含：
+  - `index`: 音轨索引
+  - `language`: 音轨语言（如果有）
+  - `codec`: 音频编码格式（如：aac, mp3等）
+  - `title`: 音轨标题（如果有）
+  - `channels`: 声道数
+  - `sampleRate`: 采样率（Hz）
+  - `bitrate`: 音频比特率（bps）
+  - `default`: 是否为默认音轨
+  - `text`: 音轨文本内容（如果有）
+
+返回示例：
+```json
+{
+    "duration": "600.5",
+    "resolution": "1920x1080",
+    "format": "mp4",
+    "bitrate": "2500000",
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "subtitles": [
+        {
+            "index": 0,
+            "language": "eng",
+            "codec": "subrip",
+            "title": "English",
+            "default": true,
+            "forced": false
+        },
+        {
+            "index": 1,
+            "language": "chi",
+            "codec": "ass",
+            "title": "中文",
+            "default": false,
+            "forced": false
+        }
+    ],
+    "audioTracks": [
+        {
+            "index": 0,
+            "language": "eng",
+            "codec": "aac",
+            "title": "Original",
+            "channels": 2,
+            "sampleRate": 48000,
+            "bitrate": "192000",
+            "default": true,
+            "text": null
+        },
+        {
+            "index": 1,
+            "language": "chi",
+            "codec": "aac",
+            "title": "中文配音",
+            "channels": 2,
+            "sampleRate": 48000,
+            "bitrate": "192000",
+            "default": false,
+            "text": null
+        }
+    ]
+}
+```
+
+字幕类型说明：
+1. 内嵌字幕流：通常存在于容器格式中（如MKV、MP4等）
+2. 隐藏字幕：CEA-608/CEA-708格式，常见于电视广播内容
+3. 硬字幕：直接渲染在视频画面上的字幕
+
+音轨说明：
+1. 支持多音轨检测和信息提取
+2. 可获取音轨的详细技术参数
+3. 支持提取音轨中的文本信息（如果存在）
+4. 支持识别默认音轨
 
 ### 2. 视频转码
 
