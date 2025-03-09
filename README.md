@@ -49,6 +49,7 @@ src/
    - 视频合并
    - 可选转场效果
    - 关键帧提取和分析
+   - 添加水印（支持图片水印）
 
 4. 视频缩略图功能：
    - 支持从视频任意时间点截取帧
@@ -364,6 +365,60 @@ curl -X POST "http://localhost:8080/api/media/clip/keyframes" \
 }
 ```
 
+#### 3.6 添加水印
+```http
+POST http://localhost:8080/api/media/clip/watermark
+Content-Type: application/json
+
+{
+    "inputPath": "/path/to/input.mp4",
+    "outputPath": "/path/to/output.mp4",
+    "watermarkPath": "/path/to/watermark.png",
+    "position": "bottomright",
+    "opacity": 0.8,
+    "margin": 10,
+    "scale": 0.1,
+    "preserveQuality": true
+}
+```
+
+参数说明：
+- `inputPath`: 输入视频文件路径（必填）
+- `outputPath`: 输出视频文件路径（必填）
+- `watermarkPath`: 水印图片文件路径（必填，支持PNG/JPG格式）
+- `position`: 水印位置（可选，支持 "topleft"/"topright"/"bottomleft"/"bottomright"/"center"，默认"bottomright"）
+- `opacity`: 水印透明度（可选，0-1之间，默认1.0）
+- `margin`: 水印边距（可选，像素值，默认10）
+- `scale`: 水印缩放比例（可选，相对于视频宽度的比例，0-1之间，默认0.1）
+- `preserveQuality`: 是否保持原视频质量（可选，默认true）
+
+返回参数：
+- `success`: 添加水印是否成功
+- `outputPath`: 输出文件路径
+- `error`: 错误信息（如果失败）
+
+使用示例：
+```bash
+curl -X POST "http://localhost:8080/api/media/clip/watermark" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputPath": "/path/to/video.mp4",
+    "outputPath": "/path/to/output.mp4",
+    "watermarkPath": "/path/to/logo.png",
+    "position": "bottomright",
+    "opacity": 0.8,
+    "scale": 0.1
+  }'
+```
+
+水印功能说明：
+1. 支持透明PNG图片作为水印
+2. 可以调整水印位置、大小、透明度
+3. 水印大小根据视频宽度自动等比缩放
+4. 支持保持原视频质量或重新编码
+5. 自动创建输出目录
+6. 支持所有常见视频格式
+
 ### 4. 生成视频缩略图
 
 ```http
@@ -447,6 +502,14 @@ Content-Type: application/json
 - 可用于优化无损剪辑的切分点选择
 - 自动创建输出目录（当需要保存图片时）
 - 支持自定义图片质量参数
+
+### 添加水印
+- 支持透明PNG图片作为水印
+- 可以调整水印位置、大小、透明度
+- 水印大小根据视频宽度自动等比缩放
+- 支持保持原视频质量或重新编码
+- 自动创建输出目录
+- 支持所有常见视频格式
 
 ## 注意事项
 

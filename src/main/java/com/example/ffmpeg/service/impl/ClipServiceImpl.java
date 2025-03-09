@@ -1,28 +1,35 @@
 package com.example.ffmpeg.service.impl;
 
+import com.example.ffmpeg.dto.WatermarkRequest;
 import com.example.ffmpeg.service.ClipService;
-import org.bytedeco.javacv.*;
-import org.bytedeco.ffmpeg.avcodec.*;
-import org.bytedeco.ffmpeg.avformat.*;
-import org.bytedeco.ffmpeg.avutil.*;
+import com.example.ffmpeg.util.FFmpegUtil;
+import lombok.extern.slf4j.Slf4j;
+import org.bytedeco.ffmpeg.global.avcodec;
+import org.bytedeco.javacv.FFmpegFrameGrabber;
+import org.bytedeco.javacv.FFmpegFrameRecorder;
+import org.bytedeco.javacv.Frame;
+import org.bytedeco.javacv.Java2DFrameConverter;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.List;
-import reactor.core.publisher.Mono;
-
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.File;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.bytedeco.ffmpeg.global.avcodec.*;
 import static org.bytedeco.ffmpeg.global.avformat.*;
 import static org.bytedeco.ffmpeg.global.avutil.*;
 
+@Slf4j
 @Service
 public class ClipServiceImpl implements ClipService {
 
@@ -317,5 +324,142 @@ public class ClipServiceImpl implements ClipService {
 
             return keyframes;
         });
+    }
+
+    @Override
+    public Mono<Map<String, Object>> addWatermark(WatermarkRequest request) {
+        return Mono.fromCallable(() -> {
+            // 验证输入参数
+            validateWatermarkRequest(request);
+
+            // 准备结果Map
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", false);
+
+            // 读取水印图片
+            BufferedImage watermark = ImageIO.read(new File(request.getWatermarkPath()));
+            
+            // 获取视频信息
+            FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(request.getInputPath());
+            grabber.start();
+            
+            // 计算水印尺寸
+            int videoWidth = grabber.getImageWidth();
+            int videoHeight = grabber.getImageHeight();
+            int watermarkWidth = (int) (videoWidth * request.getScale());
+            int watermarkHeight = (int) (watermark.getHeight() * ((float) watermarkWidth / watermark.getWidth()));
+            
+            // 缩放水印图片
+            BufferedImage scaledWatermark = new BufferedImage(watermarkWidth, watermarkHeight, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2d = scaledWatermark.createGraphics();
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g2d.drawImage(watermark, 0, 0, watermarkWidth, watermarkHeight, null);
+            g2d.dispose();
+            
+            // 计算水印位置
+            int x = 0, y = 0;
+            switch (request.getPosition().toLowerCase()) {
+                case "topleft":
+                    x = request.getMargin();
+                    y = request.getMargin();
+                    break;
+                case "topright":
+                    x = videoWidth - watermarkWidth - request.getMargin();
+                    y = request.getMargin();
+                    break;
+                case "bottomleft":
+                    x = request.getMargin();
+                    y = videoHeight - watermarkHeight - request.getMargin();
+                    break;
+                case "center":
+                    x = (videoWidth - watermarkWidth) / 2;
+                    y = (videoHeight - watermarkHeight) / 2;
+                    break;
+                default: // bottomright
+                    x = videoWidth - watermarkWidth - request.getMargin();
+                    y = videoHeight - watermarkHeight - request.getMargin();
+                    break;
+            }
+            
+            // 创建输出目录
+            Path outputPath = Paths.get(request.getOutputPath());
+            Files.createDirectories(outputPath.getParent());
+            
+            // 配置输出
+            FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(
+                request.getOutputPath(),
+                grabber.getImageWidth(),
+                grabber.getImageHeight()
+            );
+            
+            // 复制原视频的格式设置
+            recorder.setFormat(grabber.getFormat());
+            recorder.setFrameRate(grabber.getFrameRate());
+            recorder.setVideoCodec(request.isPreserveQuality() ? grabber.getVideoCodec() : avcodec.AV_CODEC_ID_H264);
+            recorder.setVideoBitrate(request.isPreserveQuality() ? grabber.getVideoBitrate() : 2000000);
+            
+            // 复制音频设置
+            recorder.setAudioChannels(grabber.getAudioChannels());
+            recorder.setAudioCodec(grabber.getAudioCodec());
+            recorder.setSampleRate(grabber.getSampleRate());
+            recorder.setAudioBitrate(grabber.getAudioBitrate());
+            
+            recorder.start();
+            
+            // 处理每一帧
+            Frame frame;
+            while ((frame = grabber.grab()) != null) {
+                if (frame.image != null) {
+                    // 转换Frame为BufferedImage
+                    Java2DFrameConverter converter = new Java2DFrameConverter();
+                    BufferedImage image = converter.convert(frame);
+                    
+                    // 在图像上绘制水印
+                    Graphics2D g2 = image.createGraphics();
+                    g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, request.getOpacity()));
+                    g2.drawImage(scaledWatermark, x, y, null);
+                    g2.dispose();
+                    
+                    // 转换回Frame并写入
+                    frame = converter.convert(image);
+                }
+                recorder.record(frame);
+            }
+            
+            // 清理资源
+            recorder.stop();
+            recorder.release();
+            grabber.stop();
+            grabber.release();
+            
+            result.put("success", true);
+            result.put("outputPath", request.getOutputPath());
+            return result;
+            
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private void validateWatermarkRequest(WatermarkRequest request) {
+        if (request.getInputPath() == null || request.getInputPath().isEmpty()) {
+            throw new IllegalArgumentException("输入视频路径不能为空");
+        }
+        if (request.getOutputPath() == null || request.getOutputPath().isEmpty()) {
+            throw new IllegalArgumentException("输出视频路径不能为空");
+        }
+        if (request.getWatermarkPath() == null || request.getWatermarkPath().isEmpty()) {
+            throw new IllegalArgumentException("水印图片路径不能为空");
+        }
+        if (request.getOpacity() < 0 || request.getOpacity() > 1) {
+            throw new IllegalArgumentException("水印透明度必须在0-1之间");
+        }
+        if (request.getScale() <= 0 || request.getScale() > 1) {
+            throw new IllegalArgumentException("水印缩放比例必须在0-1之间");
+        }
+        if (!Files.exists(Paths.get(request.getInputPath()))) {
+            throw new IllegalArgumentException("输入视频文件不存在");
+        }
+        if (!Files.exists(Paths.get(request.getWatermarkPath()))) {
+            throw new IllegalArgumentException("水印图片文件不存在");
+        }
     }
 } 

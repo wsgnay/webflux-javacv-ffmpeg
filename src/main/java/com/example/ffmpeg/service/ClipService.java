@@ -1,5 +1,6 @@
 package com.example.ffmpeg.service;
 
+import com.example.ffmpeg.dto.WatermarkRequest;
 import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.Map;
@@ -48,4 +49,11 @@ public interface ClipService {
     String losslessClip(String inputPath, String outputPath, double startTime, double duration) throws Exception;
 
     Mono<List<Map<String, Object>>> getKeyframes(String inputPath, String outputDir, boolean extractImages, String imageFormat, int imageQuality);
+
+    /**
+     * 为视频添加水印
+     * @param request 水印请求参数
+     * @return 处理结果
+     */
+    Mono<Map<String, Object>> addWatermark(WatermarkRequest request);
 } 

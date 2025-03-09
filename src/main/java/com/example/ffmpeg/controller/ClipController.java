@@ -1,6 +1,7 @@
 package com.example.ffmpeg.controller;
 
 import com.example.ffmpeg.dto.ClipRequest;
+import com.example.ffmpeg.dto.WatermarkRequest;
 import com.example.ffmpeg.service.ClipService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -133,5 +134,10 @@ public class ClipController {
                     response.put("error", e.getMessage());
                     return Mono.just(response);
                 });
+    }
+
+    @PostMapping("/watermark")
+    public Mono<Map<String, Object>> addWatermark(@RequestBody WatermarkRequest request) {
+        return clipService.addWatermark(request);
     }
 } 
