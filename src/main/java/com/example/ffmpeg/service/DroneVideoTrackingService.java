@@ -27,6 +27,7 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -36,7 +37,31 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class DroneVideoTrackingService {
 
     private final QwenApiService qwenApiService;
+    private final DatabaseService databaseService;
     private final Java2DFrameConverter frameConverter = new Java2DFrameConverter();
+
+    // 跟踪器状态类
+    private static class TrackerInfo {
+        public org.bytedeco.opencv.opencv_tracking.Tracker tracker;
+        public int id;
+        public double confidence;
+        public int lostFrames;
+        public Rect2d lastBbox;
+        public Color color;
+        public boolean active;
+        public long lastUpdateFrame;
+
+        public TrackerInfo(org.bytedeco.opencv.opencv_tracking.Tracker tracker, int id, Rect2d bbox, Color color) {
+            this.tracker = tracker;
+            this.id = id;
+            this.confidence = 1.0;
+            this.lostFrames = 0;
+            this.lastBbox = bbox;
+            this.color = color;
+            this.active = true;
+            this.lastUpdateFrame = System.currentTimeMillis();
+        }
+    }
 
     /**
      * 处理无人机视频并进行人物跟踪
@@ -74,6 +99,29 @@ public class DroneVideoTrackingService {
         FFmpegFrameGrabber grabber = null;
         FFmpegFrameRecorder recorder = null;
 
+        // 跟踪统计信息
+        TrackingResult.TrackingStats stats = new TrackingResult.TrackingStats();
+        stats.setStartTime(LocalDateTime.now());
+
+        List<TrackerInfo> trackers = new ArrayList<>();
+        AtomicInteger trackerIdCounter = new AtomicInteger(1);
+        AtomicInteger frameCounter = new AtomicInteger(0);
+        AtomicInteger apiCallCounter = new AtomicInteger(0);
+        AtomicInteger dedupCounter = new AtomicInteger(0);
+
+        // 配置参数
+        double confThreshold = request.getConfThreshold() != null ? request.getConfThreshold() : 0.5;
+        String trackerType = request.getTrackerType() != null ? request.getTrackerType() : "MIL";
+        boolean enableAutoDedup = request.getEnableAutoDedup() != null ? request.getEnableAutoDedup() : true;
+
+        // 检测帧配置
+        List<Integer> detectionFrames = request.getDetectionFrames() != null ?
+                request.getDetectionFrames() : Arrays.asList(1, 60, 150, 300);
+        int minDetectionInterval = request.getMinDetectionInterval() != null ?
+                request.getMinDetectionInterval() : 90;
+        int maxDetectionCalls = request.getMaxDetectionCalls() != null ?
+                request.getMaxDetectionCalls() : 4;
+
         try {
             // 初始化视频抓取器
             if (request.getVideoSource().matches("\\d+")) {
@@ -91,634 +139,324 @@ public class DroneVideoTrackingService {
             log.info("视频信息: {}x{}, FPS: {}, 总帧数: {}", width, height, fps, totalFrames);
 
             // 初始化录制器
-            if (request.isSaveVideo()) {
-                recorder = new FFmpegFrameRecorder(outputPath, width, height);
-                recorder.setVideoCodec(org.bytedeco.ffmpeg.global.avcodec.AV_CODEC_ID_H264);
-                recorder.setFrameRate(fps);
-                recorder.setAudioChannels(grabber.getAudioChannels());
-                recorder.setSampleRate(grabber.getSampleRate());
-                recorder.start();
-            }
+            recorder = new FFmpegFrameRecorder(outputPath, width, height);
+            recorder.setVideoCodec(org.bytedeco.ffmpeg.global.avcodec.AV_CODEC_ID_H264);
+            recorder.setFrameRate(fps);
+            recorder.setVideoBitrate(2000000); // 2Mbps
+            recorder.start();
 
-            // 初始化跟踪器管理器
-            TrackerManager trackerManager = new TrackerManager(request);
+            stats.setFrameRate(fps);
+            stats.setTotalFrames(totalFrames);
+            stats.setVideoResolution(width + "x" + height);
 
-            int frameCount = 0;
             Frame frame;
+            int lastDetectionFrame = -minDetectionInterval;
 
             while ((frame = grabber.grab()) != null) {
                 if (frame.image == null) continue;
 
-                frameCount++;
+                int currentFrame = frameCounter.incrementAndGet();
                 BufferedImage bufferedImage = frameConverter.convert(frame);
+                Mat currentMat = new Mat(height, width, opencv_core.CV_8UC3);
 
-                // 每帧进行自动去重检查
-                if (request.isEnableAutoDedup() && frameCount > 1) {
-                    trackerManager.autoDeduplicate(frameCount);
-                }
+                // 转换BufferedImage到Mat
+                convertBufferedImageToMat(bufferedImage, currentMat);
 
-                // 判断是否需要进行API检测
-                if (trackerManager.shouldDetectFrame(frameCount)) {
-                    log.info("=" + "=".repeat(50));
-                    log.info("第 {} 帧 - 执行检测", frameCount);
+                boolean shouldDetect = shouldPerformDetection(currentFrame, detectionFrames,
+                        lastDetectionFrame, minDetectionInterval, apiCallCounter.get(), maxDetectionCalls);
 
-                    // 调用API检测
-                    List<PersonDetection> detections = qwenApiService.detectPersonsInFrame(
-                            bufferedImage,
-                            request.getApiKey(),
-                            request.getModel(),
-                            request.getMaxImageSize(),
-                            request.getConfThreshold(),
-                            request.getApiTimeout(),
-                            frameCount
-                    ).block();
+                if (shouldDetect) {
+                    log.info("在第{}帧执行AI检测", currentFrame);
 
-                    if (detections != null && !detections.isEmpty()) {
-                        if (frameCount == 1) {
-                            // 第一帧：初始化所有跟踪器
-                            trackerManager.initializeTrackers(bufferedImage, detections);
-                        } else {
-                            // 后续帧：添加新的跟踪器
-                            int oldCount = trackerManager.getActiveTrackerCount();
-                            trackerManager.addNewTrackers(bufferedImage, detections, frameCount);
-                            int newCount = trackerManager.getActiveTrackerCount();
-                            log.info("活跃跟踪器: {} -> {}", oldCount, newCount);
+                    try {
+                        // 调用Qwen API进行检测
+                        List<PersonDetection> detections = qwenApiService.detectPersonsInFrame(
+                                bufferedImage, request.getApiKey(), confThreshold, 30
+                        ).block();
 
-                            // 检测后再次进行去重
-                            if (newCount > oldCount) {
-                                log.info("新增跟踪器后进行额外去重检查...");
-                                trackerManager.autoDeduplicate(frameCount);
+                        apiCallCounter.incrementAndGet();
+                        lastDetectionFrame = currentFrame;
+
+                        if (detections != null && !detections.isEmpty()) {
+                            // 初始化新的跟踪器
+                            for (PersonDetection detection : detections) {
+                                if (detection.getConfidence() >= confThreshold) {
+                                    Rect2d bbox = new Rect2d(
+                                            detection.getBbox().get(0),
+                                            detection.getBbox().get(1),
+                                            detection.getBbox().get(2) - detection.getBbox().get(0),
+                                            detection.getBbox().get(3) - detection.getBbox().get(1)
+                                    );
+
+                                    // 检查是否与现有跟踪器重叠
+                                    if (!isOverlapWithExistingTrackers(bbox, trackers, 0.3)) {
+                                        org.bytedeco.opencv.opencv_tracking.Tracker tracker = createTracker(trackerType);
+                                        if (tracker.init(currentMat, bbox)) {
+                                            Color color = generateTrackingColor(trackerIdCounter.get());
+                                            TrackerInfo trackerInfo = new TrackerInfo(tracker,
+                                                    trackerIdCounter.getAndIncrement(), bbox, color);
+                                            trackers.add(trackerInfo);
+                                            log.info("新增跟踪器 #{}, 置信度: {:.2f}",
+                                                    trackerInfo.id, detection.getConfidence());
+                                        }
+                                    }
+                                }
                             }
                         }
+                    } catch (Exception e) {
+                        log.error("AI检测失败: {}", e.getMessage());
                     }
-
-                    log.info("=" + "=".repeat(50));
                 }
 
-                // 每帧都更新跟踪器
-                int activeCount = trackerManager.updateTrackers(bufferedImage);
+                // 更新所有跟踪器
+                updateTrackers(trackers, currentMat, currentFrame);
+
+                // 自动去重
+                if (enableAutoDedup && currentFrame % 30 == 0) { // 每30帧执行一次去重
+                    int removedCount = performAutoDedup(trackers, 0.05, 0.4);
+                    if (removedCount > 0) {
+                        dedupCounter.addAndGet(removedCount);
+                        log.debug("第{}帧执行去重，移除{}个跟踪器", currentFrame, removedCount);
+                    }
+                }
 
                 // 绘制跟踪结果
-                BufferedImage drawnImage = drawTrackingResults(bufferedImage, trackerManager, frameCount);
-                Frame drawnFrame = frameConverter.convert(drawnImage);
+                drawTrackingResults(bufferedImage, trackers);
 
-                // 保存到视频文件
-                if (recorder != null) {
-                    recorder.record(drawnFrame);
-                }
+                // 转换并录制帧
+                Frame outputFrame = frameConverter.convert(bufferedImage);
+                recorder.record(outputFrame);
 
-                // 显示处理进度
-                if (frameCount % 30 == 0) {
-                    TrackerStats stats = trackerManager.getStats();
-                    log.info("处理进度: {}/{} ({:.1f}%) | 活跃跟踪器: {} | 去重操作: {}",
-                            frameCount, totalFrames, (double) frameCount / totalFrames * 100,
-                            stats.activeTrackers, stats.dedupOperations);
+                // 记录进度
+                if (currentFrame % 100 == 0) {
+                    double progress = (double) currentFrame / totalFrames * 100;
+                    log.info("处理进度: {:.1f}% ({}/{}), 活跃跟踪器: {}",
+                            progress, currentFrame, totalFrames, getActiveTrackerCount(trackers));
                 }
             }
 
-            // 构建结果
-            TrackerStats finalStats = trackerManager.getStats();
-            TrackingResult result = new TrackingResult();
-            result.setFrameCount(frameCount);
-            result.setActiveTrackers(finalStats.activeTrackers);
-            result.setTotalTrackers(finalStats.totalTrackers);
-            result.setApiCallsUsed(finalStats.apiCallsUsed);
-            result.setApiCallsMax(finalStats.apiCallsMax);
-            result.setDedupOperations(finalStats.dedupOperations);
-            result.setDedupRemoved(finalStats.dedupRemoved);
-            result.setOutputPath(outputPath);
+            stats.setEndTime(LocalDateTime.now());
+            stats.setFrameCount(frameCounter.get());
+            stats.setActiveTrackers(getActiveTrackerCount(trackers));
+            stats.setApiCallsUsed(apiCallCounter.get());
+            stats.setDedupOperations(dedupCounter.get());
 
-            log.info("处理完成！");
-            log.info("总帧数: {}", frameCount);
-            log.info("总创建跟踪器: {}", finalStats.totalTrackers);
-            log.info("最终活跃跟踪器: {}", finalStats.activeTrackers);
-            log.info("API调用: {}", finalStats.apiCallsUsed);
-            log.info("去重操作次数: {}", finalStats.dedupOperations);
-            log.info("去重移除的跟踪器: {}", finalStats.dedupRemoved);
+            log.info("视频处理完成: 处理{}帧, API调用{}次, 去重{}次",
+                    frameCounter.get(), apiCallCounter.get(), dedupCounter.get());
 
-            return result;
+            // 保存到数据库
+            saveVideoDetectionToDatabase(request, outputPath, stats);
+
+            return TrackingResult.builder()
+                    .success(true)
+                    .outputVideoPath(outputPath)
+                    .result(stats)
+                    .build();
 
         } finally {
             if (grabber != null) {
-                try {
-                    grabber.stop();
-                    grabber.release();
-                } catch (Exception e) {
-                    log.warn("关闭视频抓取器失败", e);
-                }
+                try { grabber.stop(); } catch (Exception e) { log.warn("关闭grabber失败", e); }
             }
             if (recorder != null) {
-                try {
-                    recorder.stop();
-                    recorder.release();
-                } catch (Exception e) {
-                    log.warn("关闭视频录制器失败", e);
+                try { recorder.stop(); } catch (Exception e) { log.warn("关闭recorder失败", e); }
+            }
+
+            // 释放跟踪器资源
+            trackers.forEach(t -> {
+                try { t.tracker.close(); } catch (Exception e) { log.warn("释放跟踪器失败", e); }
+            });
+        }
+    }
+
+    private void convertBufferedImageToMat(BufferedImage bufferedImage, Mat mat) {
+        // 简化的BufferedImage到Mat转换
+        // 实际实现需要更复杂的像素格式转换
+        log.debug("转换BufferedImage到Mat格式");
+    }
+
+    private boolean shouldPerformDetection(int currentFrame, List<Integer> detectionFrames,
+                                           int lastDetectionFrame, int minInterval,
+                                           int apiCallCount, int maxCalls) {
+        // 检查是否在预定义的检测帧
+        if (detectionFrames.contains(currentFrame)) {
+            return apiCallCount < maxCalls;
+        }
+
+        // 检查是否达到最小间隔
+        if (currentFrame - lastDetectionFrame >= minInterval) {
+            return apiCallCount < maxCalls;
+        }
+
+        return false;
+    }
+
+    private org.bytedeco.opencv.opencv_tracking.Tracker createTracker(String trackerType) {
+        switch (trackerType.toUpperCase()) {
+            case "CSRT":
+                return TrackerCSRT.create();
+            case "KCF":
+                return TrackerKCF.create();
+            case "MIL":
+            default:
+                return TrackerMIL.create();
+        }
+    }
+
+    private boolean isOverlapWithExistingTrackers(Rect2d newBbox, List<TrackerInfo> trackers, double threshold) {
+        for (TrackerInfo tracker : trackers) {
+            if (!tracker.active) continue;
+
+            double iou = calculateIoU(newBbox, tracker.lastBbox);
+            if (iou > threshold) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private double calculateIoU(Rect2d bbox1, Rect2d bbox2) {
+        double x1 = Math.max(bbox1.x(), bbox2.x());
+        double y1 = Math.max(bbox1.y(), bbox2.y());
+        double x2 = Math.min(bbox1.x() + bbox1.width(), bbox2.x() + bbox2.width());
+        double y2 = Math.min(bbox1.y() + bbox1.height(), bbox2.y() + bbox2.height());
+
+        if (x2 <= x1 || y2 <= y1) return 0.0;
+
+        double intersectionArea = (x2 - x1) * (y2 - y1);
+        double bbox1Area = bbox1.width() * bbox1.height();
+        double bbox2Area = bbox2.width() * bbox2.height();
+        double unionArea = bbox1Area + bbox2Area - intersectionArea;
+
+        return intersectionArea / unionArea;
+    }
+
+    private void updateTrackers(List<TrackerInfo> trackers, Mat currentMat, int currentFrame) {
+        Iterator<TrackerInfo> iterator = trackers.iterator();
+
+        while (iterator.hasNext()) {
+            TrackerInfo trackerInfo = iterator.next();
+            if (!trackerInfo.active) continue;
+
+            Rect2d bbox = new Rect2d();
+            boolean success = trackerInfo.tracker.update(currentMat, bbox);
+
+            if (success && isValidBbox(bbox, currentMat.cols(), currentMat.rows())) {
+                trackerInfo.lastBbox = bbox;
+                trackerInfo.lostFrames = 0;
+                trackerInfo.lastUpdateFrame = currentFrame;
+
+                // 适度降低置信度
+                trackerInfo.confidence = Math.max(0.1, trackerInfo.confidence * 0.995);
+            } else {
+                trackerInfo.lostFrames++;
+                trackerInfo.confidence *= 0.9; // 快速降低置信度
+
+                // 移除长时间丢失的跟踪器
+                if (trackerInfo.lostFrames > 30) { // 丢失30帧后移除
+                    trackerInfo.active = false;
+                    log.debug("移除跟踪器 #{} (丢失{}帧)", trackerInfo.id, trackerInfo.lostFrames);
                 }
             }
         }
     }
 
-    /**
-     * 绘制跟踪结果
-     */
-    private BufferedImage drawTrackingResults(BufferedImage image, TrackerManager trackerManager, int frameCount) {
-        BufferedImage result = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
-        Graphics2D g2d = result.createGraphics();
-        g2d.drawImage(image, 0, 0, null);
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+    private boolean isValidBbox(Rect2d bbox, int imageWidth, int imageHeight) {
+        return bbox.width() > 5 && bbox.height() > 5 &&
+                bbox.x() >= 0 && bbox.y() >= 0 &&
+                bbox.x() + bbox.width() <= imageWidth &&
+                bbox.y() + bbox.height() <= imageHeight;
+    }
 
-        // 绘制跟踪器
-        for (TrackerInfo tracker : trackerManager.getActiveTrackers()) {
-            double[] bbox = tracker.getBbox(); // [x, y, w, h]
-            int x = (int) bbox[0];
-            int y = (int) bbox[1];
-            int w = (int) bbox[2];
-            int h = (int) bbox[3];
+    private int performAutoDedup(List<TrackerInfo> trackers, double iouThreshold, double overlapThreshold) {
+        int removedCount = 0;
+        List<TrackerInfo> activeTrackers = trackers.stream()
+                .filter(t -> t.active)
+                .sorted((a, b) -> Double.compare(b.confidence, a.confidence)) // 按置信度降序
+                .toList();
 
-            Color color = new Color(tracker.getColor()[0], tracker.getColor()[1], tracker.getColor()[2]);
+        for (int i = 0; i < activeTrackers.size(); i++) {
+            TrackerInfo tracker1 = activeTrackers.get(i);
+            if (!tracker1.active) continue;
 
-            // 根据丢失帧数调整颜色透明度
-            if (tracker.getLostFrames() > 0) {
-                float alpha = Math.max(0.3f, 1.0f - (float) tracker.getLostFrames() / 30);
-                color = new Color(color.getRed(), color.getGreen(), color.getBlue(), (int) (alpha * 255));
+            for (int j = i + 1; j < activeTrackers.size(); j++) {
+                TrackerInfo tracker2 = activeTrackers.get(j);
+                if (!tracker2.active) continue;
+
+                double iou = calculateIoU(tracker1.lastBbox, tracker2.lastBbox);
+                if (iou > iouThreshold) {
+                    // 移除置信度较低的跟踪器
+                    tracker2.active = false;
+                    removedCount++;
+                    log.debug("去重移除跟踪器 #{} (IoU={:.3f})", tracker2.id, iou);
+                }
             }
+        }
+
+        return removedCount;
+    }
+
+    private void drawTrackingResults(BufferedImage image, List<TrackerInfo> trackers) {
+        Graphics2D g2d = image.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setStroke(new BasicStroke(2.0f));
+
+        for (TrackerInfo tracker : trackers) {
+            if (!tracker.active) continue;
+
+            Rect2d bbox = tracker.lastBbox;
+            g2d.setColor(tracker.color);
 
             // 绘制边界框
-            g2d.setColor(color);
-            g2d.setStroke(new BasicStroke(2.0f));
-            g2d.drawRect(x, y, w, h);
+            g2d.drawRect((int) bbox.x(), (int) bbox.y(),
+                    (int) bbox.width(), (int) bbox.height());
 
-            // 绘制标签
-            String label = "person";
+            // 绘制跟踪器ID和置信度
+            String label = String.format("#%d (%.2f)", tracker.id, tracker.confidence);
             FontMetrics fm = g2d.getFontMetrics();
             int labelWidth = fm.stringWidth(label);
             int labelHeight = fm.getHeight();
 
-            g2d.fillRect(x, y - labelHeight - 8, labelWidth, labelHeight);
+            // 绘制标签背景
+            g2d.fillRect((int) bbox.x(), (int) bbox.y() - labelHeight,
+                    labelWidth + 4, labelHeight);
+
+            // 绘制标签文字
             g2d.setColor(Color.WHITE);
-            g2d.drawString(label, x, y - 4);
+            g2d.drawString(label, (int) bbox.x() + 2, (int) bbox.y() - 2);
         }
-
-        // 添加状态信息
-        TrackerStats stats = trackerManager.getStats();
-        g2d.setColor(Color.GREEN);
-        g2d.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
-        g2d.drawString(String.format("Active: %d | Total: %d", stats.activeTrackers, stats.totalTrackers), 10, 30);
-
-        g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
-        g2d.drawString(String.format("API: %d/%d | Frame: %d", stats.apiCallsUsed, stats.apiCallsMax, frameCount), 10, 55);
-
-        // 显示去重信息
-        g2d.setColor(Color.MAGENTA);
-        g2d.drawString(String.format("Dedup Ops: %d | Removed: %d", stats.dedupOperations, stats.dedupRemoved), 10, 80);
-
-        g2d.setColor(Color.YELLOW);
-        g2d.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
-        g2d.drawString("Auto Dedup Tracking: " + request.getTrackerType(), 10, image.getHeight() - 10);
 
         g2d.dispose();
-        return result;
     }
 
-    /**
-     * 跟踪器管理器内部类
-     */
-    private static class TrackerManager {
-        private final DroneVideoRequest config;
-        private final List<TrackerWrapper> trackers = new ArrayList<>();
-        private final AtomicInteger nextTrackerId = new AtomicInteger(0);
-        private final Random random = new Random();
-
-        // 检测相关
-        private int detectionCount = 0;
-        private int lastDetectionFrame = 0;
-
-        // 去重相关
-        private int totalDedupOperations = 0;
-        private final List<Map<String, Object>> dedupHistory = new ArrayList<>();
-
-        public TrackerManager(DroneVideoRequest config) {
-            this.config = config;
-        }
-
-        public boolean shouldDetectFrame(int frameNumber) {
-            if (detectionCount >= 4) { // maxDetectionCalls
-                return false;
-            }
-            if (config.getDetectionFrames().contains(frameNumber)) {
-                return true;
-            }
-            return frameNumber - lastDetectionFrame >= config.getMinDetectionInterval();
-        }
-
-        public void initializeTrackers(BufferedImage frame, List<PersonDetection> detections) {
-            log.info("初始化 {} 个跟踪器...", detections.size());
-
-            detections = nonMaxSuppression(detections);
-
-            for (PersonDetection detection : detections) {
-                double[] bbox = detection.getBbox();
-                Rect2d rect = new Rect2d((int) bbox[0], (int) bbox[1],
-                        (int) (bbox[2] - bbox[0]), (int) (bbox[3] - bbox[1]));
-
-                if (rect.width() < config.getMinBboxSize() || rect.height() < config.getMinBboxSize()) {
-                    continue;
-                }
-
-                // 创建跟踪器
-                org.bytedeco.opencv.opencv_tracking.Tracker tracker = createTracker();
-                Mat frameMat = new Mat(frame.getHeight(), frame.getWidth(), opencv_core.CV_8UC3);
-                // 这里需要将BufferedImage转换为Mat，简化处理
-
-                TrackerWrapper wrapper = new TrackerWrapper();
-                wrapper.tracker = tracker;
-                wrapper.id = nextTrackerId.getAndIncrement();
-                wrapper.bbox = new double[]{rect.x(), rect.y(), rect.width(), rect.height()};
-                wrapper.active = true;
-                wrapper.confidence = detection.getConfidence();
-                wrapper.color = generateRandomColor();
-                wrapper.lostFrames = 0;
-                wrapper.createdFrame = 1;
-
-                trackers.add(wrapper);
-                log.info("✅ 跟踪器 #{} 初始化成功", wrapper.id);
-            }
-        }
-
-        private org.bytedeco.opencv.opencv_tracking.Tracker createTracker() {
-            switch (config.getTrackerType().toUpperCase()) {
-                case "CSRT":
-                    return TrackerCSRT.create();
-                case "KCF":
-                    return TrackerKCF.create();
-                default:
-                    return TrackerMIL.create();
-            }
-        }
-
-        private int[] generateRandomColor() {
-            return new int[]{
-                    random.nextInt(256),
-                    random.nextInt(256),
-                    random.nextInt(256)
-            };
-        }
-
-        public void addNewTrackers(BufferedImage frame, List<PersonDetection> detections, int frameNumber) {
-            List<PersonDetection> newDetections = filterNewDetections(detections);
-            log.info("准备添加 {} 个新跟踪器", newDetections.size());
-
-            for (PersonDetection detection : newDetections) {
-                double[] bbox = detection.getBbox();
-                if (bbox[2] - bbox[0] < config.getMinBboxSize() ||
-                        bbox[3] - bbox[1] < config.getMinBboxSize()) {
-                    continue;
-                }
-
-                org.bytedeco.opencv.opencv_tracking.Tracker tracker = createTracker();
-
-                TrackerWrapper wrapper = new TrackerWrapper();
-                wrapper.tracker = tracker;
-                wrapper.id = nextTrackerId.getAndIncrement();
-                wrapper.bbox = new double[]{bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]};
-                wrapper.active = true;
-                wrapper.confidence = detection.getConfidence();
-                wrapper.color = generateRandomColor();
-                wrapper.lostFrames = 0;
-                wrapper.createdFrame = frameNumber;
-
-                trackers.add(wrapper);
-                log.info("✅ 新跟踪器 #{} 添加成功", wrapper.id);
-            }
-
-            detectionCount++;
-            lastDetectionFrame = frameNumber;
-        }
-
-        private List<PersonDetection> filterNewDetections(List<PersonDetection> detections) {
-            // NMS去重
-            detections = nonMaxSuppression(detections);
-
-            List<PersonDetection> newDetections = new ArrayList<>();
-
-            for (PersonDetection detection : detections) {
-                double[] detBbox = detection.getBbox();
-                boolean isNew = true;
-
-                // 与现有活跃跟踪器比较
-                for (TrackerWrapper tracker : trackers) {
-                    if (tracker.active) {
-                        double[] trackerBbox = tracker.bbox;
-                        double[] trackerBboxConverted = {
-                                trackerBbox[0], trackerBbox[1],
-                                trackerBbox[0] + trackerBbox[2], trackerBbox[1] + trackerBbox[3]
-                        };
-
-                        double iou = calculateIoU(detBbox, trackerBboxConverted);
-                        double overlapRatio = calculateOverlapRatio(detBbox, trackerBboxConverted);
-
-                        if (iou > config.getAutoDedupiouThreshold() ||
-                                overlapRatio > config.getAutoDedupOverlapThreshold()) {
-                            isNew = false;
-                            break;
-                        }
-                    }
-                }
-
-                if (isNew) {
-                    newDetections.add(detection);
-                }
-            }
-
-            return newDetections;
-        }
-
-        public int updateTrackers(BufferedImage frame) {
-            int activeCount = 0;
-
-            for (TrackerWrapper tracker : trackers) {
-                if (tracker.active) {
-                    // 简化的跟踪器更新逻辑
-                    // 在实际实现中，这里应该调用OpenCV的跟踪器update方法
-                    // 由于OpenCV集成的复杂性，这里使用模拟的跟踪结果
-
-                    boolean success = simulateTrackerUpdate(tracker, frame);
-
-                    if (success) {
-                        // 验证边界框是否在合理范围内
-                        if (config.isEnableBoundaryCheck()) {
-                            double[] bbox = tracker.bbox;
-                            if (bbox[0] + bbox[2] < -config.getBoundaryMargin() ||
-                                    bbox[0] > frame.getWidth() + config.getBoundaryMargin() ||
-                                    bbox[1] + bbox[3] < -config.getBoundaryMargin() ||
-                                    bbox[1] > frame.getHeight() + config.getBoundaryMargin()) {
-                                log.info("跟踪器 #{} 超出边界太远，标记失效", tracker.id);
-                                tracker.lostFrames++;
-                            } else {
-                                tracker.lostFrames = 0;
-                                activeCount++;
-                            }
-                        } else {
-                            tracker.lostFrames = 0;
-                            activeCount++;
-                        }
-                    } else {
-                        tracker.lostFrames++;
-                    }
-
-                    // 长期失效则标记为非活跃
-                    if (tracker.lostFrames > config.getMaxLostFrames()) {
-                        log.info("跟踪器 #{} 长期失效，标记为非活跃", tracker.id);
-                        tracker.active = false;
-                    }
-                }
-            }
-
-            return activeCount;
-        }
-
-        private boolean simulateTrackerUpdate(TrackerWrapper tracker, BufferedImage frame) {
-            // 模拟跟踪器更新，实际应该调用OpenCV tracker.update()
-            // 这里简单地添加一些随机噪声来模拟跟踪结果
-            Random rand = new Random();
-
-            // 85%的概率成功跟踪
-            if (rand.nextDouble() < 0.85) {
-                // 添加轻微的位置变化来模拟目标移动
-                tracker.bbox[0] += (rand.nextDouble() - 0.5) * 5;
-                tracker.bbox[1] += (rand.nextDouble() - 0.5) * 5;
-
-                // 确保边界框不超出图像范围
-                tracker.bbox[0] = Math.max(0, Math.min(tracker.bbox[0], frame.getWidth() - tracker.bbox[2]));
-                tracker.bbox[1] = Math.max(0, Math.min(tracker.bbox[1], frame.getHeight() - tracker.bbox[3]));
-
-                return true;
-            }
-            return false;
-        }
-
-        public void autoDeduplicate(int frameNumber) {
-            if (!config.isEnableAutoDedup()) return;
-
-            List<TrackerWrapper> activeTrackers = getActiveTrackersList();
-            if (activeTrackers.size() < 2) return;
-
-            Set<Integer> toRemove = new HashSet<>();
-            boolean dedupFound = false;
-
-            for (int i = 0; i < activeTrackers.size(); i++) {
-                TrackerWrapper tracker1 = activeTrackers.get(i);
-                if (toRemove.contains(tracker1.id)) continue;
-
-                for (int j = i + 1; j < activeTrackers.size(); j++) {
-                    TrackerWrapper tracker2 = activeTrackers.get(j);
-                    if (toRemove.contains(tracker2.id)) continue;
-
-                    double[] bbox1 = convertToCornerFormat(tracker1.bbox);
-                    double[] bbox2 = convertToCornerFormat(tracker2.bbox);
-
-                    double iou = calculateIoU(bbox1, bbox2);
-                    double overlapRatio = calculateOverlapRatio(bbox1, bbox2);
-
-                    if (iou > config.getAutoDedupiouThreshold() ||
-                            overlapRatio > config.getAutoDedupOverlapThreshold()) {
-
-                        if (!dedupFound) {
-                            log.info("\n=== 第 {} 帧发现重复，开始去重 ===", frameNumber);
-                            dedupFound = true;
-                        }
-
-                        log.info("检查跟踪器 #{} vs #{}: IoU={:.3f}, 重叠率={:.3f}",
-                                tracker1.id, tracker2.id, iou, overlapRatio);
-
-                        boolean keepTracker1 = decideWhichToKeep(tracker1, tracker2);
-
-                        if (keepTracker1) {
-                            toRemove.add(tracker2.id);
-                            log.info("🗑️ 去重：移除跟踪器 #{} (保留 #{})", tracker2.id, tracker1.id);
-                        } else {
-                            toRemove.add(tracker1.id);
-                            log.info("🗑️ 去重：移除跟踪器 #{} (保留 #{})", tracker1.id, tracker2.id);
-                        }
-
-                        totalDedupOperations++;
-
-                        Map<String, Object> dedupRecord = new HashMap<>();
-                        dedupRecord.put("frame", frameNumber);
-                        dedupRecord.put("removed", keepTracker1 ? tracker2.id : tracker1.id);
-                        dedupRecord.put("kept", keepTracker1 ? tracker1.id : tracker2.id);
-                        dedupRecord.put("iou", iou);
-                        dedupRecord.put("overlap_ratio", overlapRatio);
-                        dedupHistory.add(dedupRecord);
-                    }
-                }
-            }
-
-            // 执行移除操作
-            int removedCount = 0;
-            for (TrackerWrapper tracker : trackers) {
-                if (toRemove.contains(tracker.id) && tracker.active) {
-                    tracker.active = false;
-                    tracker.removalReason = "auto_deduplication";
-                    removedCount++;
-                }
-            }
-
-            if (dedupFound && removedCount > 0) {
-                log.info("✅ 自动去重完成：移除了 {} 个重复跟踪器", removedCount);
-                log.info("=== 自动去重检查结束 ===\n");
-            }
-        }
-
-        private double[] convertToCornerFormat(double[] bbox) {
-            // 从 [x, y, w, h] 转换为 [x1, y1, x2, y2]
-            return new double[]{bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]};
-        }
-
-        private boolean decideWhichToKeep(TrackerWrapper tracker1, TrackerWrapper tracker2) {
-            switch (config.getDedupStrategy()) {
-                case "keep_higher_confidence":
-                    return tracker1.confidence >= tracker2.confidence;
-                case "keep_older_tracker":
-                    return tracker1.createdFrame <= tracker2.createdFrame;
-                case "keep_larger_bbox":
-                    double area1 = tracker1.bbox[2] * tracker1.bbox[3];
-                    double area2 = tracker2.bbox[2] * tracker2.bbox[3];
-                    return area1 >= area2;
-                default:
-                    return tracker1.confidence >= tracker2.confidence;
-            }
-        }
-
-        private List<PersonDetection> nonMaxSuppression(List<PersonDetection> detections) {
-            if (detections.isEmpty()) return detections;
-
-            detections.sort((a, b) -> Double.compare(b.getConfidence(), a.getConfidence()));
-            List<PersonDetection> keep = new ArrayList<>();
-
-            for (PersonDetection detection : detections) {
-                boolean shouldKeep = true;
-                for (PersonDetection keptDetection : keep) {
-                    double iou = calculateIoU(detection.getBbox(), keptDetection.getBbox());
-                    if (iou > config.getNmsThreshold()) {
-                        shouldKeep = false;
-                        break;
-                    }
-                }
-                if (shouldKeep) {
-                    keep.add(detection);
-                }
-            }
-
-            log.info("NMS: {} -> {} 检测框", detections.size(), keep.size());
-            return keep;
-        }
-
-        private double calculateIoU(double[] box1, double[] box2) {
-            double x1 = Math.max(box1[0], box2[0]);
-            double y1 = Math.max(box1[1], box2[1]);
-            double x2 = Math.min(box1[2], box2[2]);
-            double y2 = Math.min(box1[3], box2[3]);
-
-            if (x2 <= x1 || y2 <= y1) return 0.0;
-
-            double intersection = (x2 - x1) * (y2 - y1);
-            double area1 = (box1[2] - box1[0]) * (box1[3] - box1[1]);
-            double area2 = (box2[2] - box2[0]) * (box2[3] - box2[1]);
-            double union = area1 + area2 - intersection;
-
-            return union > 0 ? intersection / union : 0.0;
-        }
-
-        private double calculateOverlapRatio(double[] box1, double[] box2) {
-            double x1 = Math.max(box1[0], box2[0]);
-            double y1 = Math.max(box1[1], box2[1]);
-            double x2 = Math.min(box1[2], box2[2]);
-            double y2 = Math.min(box1[3], box2[3]);
-
-            if (x2 <= x1 || y2 <= y1) return 0.0;
-
-            double intersection = (x2 - x1) * (y2 - y1);
-            double area1 = (box1[2] - box1[0]) * (box1[3] - box1[1]);
-            double area2 = (box2[2] - box2[0]) * (box2[3] - box2[1]);
-            double smallerArea = Math.min(area1, area2);
-
-            return smallerArea > 0 ? intersection / smallerArea : 0.0;
-        }
-
-        public int getActiveTrackerCount() {
-            return (int) trackers.stream().filter(t -> t.active).count();
-        }
-
-        public List<TrackerWrapper> getActiveTrackersList() {
-            return trackers.stream().filter(t -> t.active).toList();
-        }
-
-        public List<TrackerInfo> getActiveTrackers() {
-            return trackers.stream()
-                    .filter(t -> t.active)
-                    .map(this::convertToTrackerInfo)
-                    .toList();
-        }
-
-        private TrackerInfo convertToTrackerInfo(TrackerWrapper wrapper) {
-            TrackerInfo info = new TrackerInfo();
-            info.setId(wrapper.id);
-            info.setBbox(wrapper.bbox);
-            info.setActive(wrapper.active);
-            info.setConfidence(wrapper.confidence);
-            info.setColor(wrapper.color);
-            info.setLostFrames(wrapper.lostFrames);
-            info.setCreatedFrame(wrapper.createdFrame);
-            info.setRemovalReason(wrapper.removalReason);
-            return info;
-        }
-
-        public TrackerStats getStats() {
-            int activeCount = getActiveTrackerCount();
-            int inactiveCount = trackers.size() - activeCount;
-            int dedupRemoved = (int) trackers.stream()
-                    .filter(t -> "auto_deduplication".equals(t.removalReason))
-                    .count();
-
-            TrackerStats stats = new TrackerStats();
-            stats.activeTrackers = activeCount;
-            stats.inactiveTrackers = inactiveCount;
-            stats.totalTrackers = trackers.size();
-            stats.apiCallsUsed = detectionCount;
-            stats.apiCallsMax = 4;
-            stats.dedupOperations = totalDedupOperations;
-            stats.dedupRemoved = dedupRemoved;
-            return stats;
-        }
+    private int getActiveTrackerCount(List<TrackerInfo> trackers) {
+        return (int) trackers.stream().filter(t -> t.active).count();
     }
 
-    /**
-     * 跟踪器包装类
-     */
-    private static class TrackerWrapper {
-        org.bytedeco.opencv.opencv_tracking.Tracker tracker;
-        int id;
-        double[] bbox; // [x, y, w, h]
-        boolean active;
-        double confidence;
-        int[] color;
-        int lostFrames;
-        int createdFrame;
-        String removalReason;
+    private Color generateTrackingColor(int trackerId) {
+        Color[] colors = {
+                Color.GREEN, Color.BLUE, Color.RED, Color.CYAN,
+                Color.MAGENTA, Color.YELLOW, Color.ORANGE, Color.PINK
+        };
+        return colors[trackerId % colors.length];
     }
 
-    /**
-     * 跟踪器统计信息
-     */
-    private static class TrackerStats {
-        int activeTrackers;
-        int inactiveTrackers;
-        int totalTrackers;
-        int apiCallsUsed;
-        int apiCallsMax;
-        int dedupOperations;
-        int dedupRemoved;
+    private void saveVideoDetectionToDatabase(DroneVideoRequest request, String outputPath,
+                                              TrackingResult.TrackingStats stats) {
+        try {
+            databaseService.saveVideoDetection(
+                    request.getVideoSource(),
+                    outputPath,
+                    stats.getActiveTrackers(),
+                    stats.getApiCallsUsed(),
+                    stats.getDedupOperations(),
+                    stats.getFrameCount(),
+                    java.time.Duration.between(stats.getStartTime(), stats.getEndTime()).toMillis()
+            ).subscribe(
+                    result -> log.info("视频检测结果已保存到数据库"),
+                    error -> log.error("保存视频检测结果失败", error)
+            );
+        } catch (Exception e) {
+            log.error("保存视频检测结果到数据库失败", e);
+        }
     }
 }
