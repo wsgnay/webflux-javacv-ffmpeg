@@ -45,12 +45,6 @@
             <artifactId>spring-boot-starter-data-r2dbc</artifactId>
         </dependency>
 
-        <!-- MySQL R2DBC Driver -->
-        <dependency>
-            <groupId>io.asyncer</groupId>
-            <artifactId>r2dbc-mysql</artifactId>
-        </dependency>
-
         <!-- MySQL JDBC Driver (for Flyway migrations) -->
         <dependency>
             <groupId>mysql</groupId>
