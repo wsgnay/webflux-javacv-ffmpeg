@@ -3,8 +3,8 @@ package com.example.ffmpeg.controller;
 import com.example.ffmpeg.dto.MediaInfo;
 import com.example.ffmpeg.dto.TranscodeRequest;
 import com.example.ffmpeg.service.MediaService;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
+import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -27,4 +27,4 @@ public class MediaController {
     public Mono<String> transcodeMedia(@RequestBody @Valid TranscodeRequest request) {
         return mediaService.transcodeMedia(request);
     }
-} 
+}
