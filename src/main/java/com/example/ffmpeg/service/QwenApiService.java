@@ -276,7 +276,7 @@ public class QwenApiService {
     }
 
     /**
-     * 测试API连接 - 修复版本
+     * 测试API连接
      */
     public Mono<Boolean> testConnection(String apiKey, String model) {
         log.info("开始测试Qwen API连接，模型: {}", model);

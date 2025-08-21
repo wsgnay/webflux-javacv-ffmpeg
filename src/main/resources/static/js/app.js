@@ -652,21 +652,23 @@ class DroneDetectionApp {
         try {
             // 尝试从API加载真实数据
             const response = await fetch(`${this.apiBaseUrl}/data/history?filter=${filter}&status=${status}&date=${date}`);
-            let history;
+            let historyData;
 
             if (response.ok) {
-                history = await response.json();
+                const result = await response.json();
+                // 从响应对象中提取data数组
+                historyData = result.data || [];
             } else {
                 // 如果API不可用，使用模拟数据
-                history = await this.fetchHistory(filter, status, date);
+                historyData = await this.fetchHistory(filter, status, date);
             }
 
-            this.displayHistory(history);
+            this.displayHistory(historyData);
         } catch (error) {
             console.error('加载历史记录失败:', error);
             // 使用模拟数据
-            const history = await this.fetchHistory(filter, status, date);
-            this.displayHistory(history);
+            const historyData = await this.fetchHistory(filter, status, date);
+            this.displayHistory(historyData);
         }
     }
 

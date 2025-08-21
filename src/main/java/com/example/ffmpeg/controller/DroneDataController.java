@@ -30,16 +30,17 @@ public class DroneDataController {
     @GetMapping("/dashboard/stats")
     public Mono<ResponseEntity<Map<String, Object>>> getDashboardStats() {
         return databaseService.getDetectionStats()
-                .map(stats -> {
+                .flatMap(stats -> {
+                    // 创建一个新的可变Map来包装不可变的stats
+                    Map<String, Object> mutableStats = new HashMap<>(stats);
                     // 添加最近活动数据
                     return databaseService.getRecentDetections(5)
                             .collectList()
                             .map(recentActivities -> {
-                                stats.put("recentActivities", recentActivities);
-                                return ResponseEntity.ok(stats);
+                                mutableStats.put("recentActivities", recentActivities);
+                                return ResponseEntity.ok(mutableStats);
                             });
                 })
-                .flatMap(mono -> mono)
                 .onErrorResume(ex -> {
                     log.error("获取仪表板统计数据失败", ex);
                     // 返回模拟数据作为备用
