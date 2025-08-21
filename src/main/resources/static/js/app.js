@@ -13,7 +13,11 @@ class DroneDetectionApp {
     constructor() {
         this.apiBaseUrl = 'http://localhost:8080/api/drone';
         this.isDebugMode = true; // 调试模式
-        this.initializeApp();
+        this.currentSection = 'dashboard';
+        this.settings = this.loadSettingsFromStorage();
+        this.currentImageFile = null;
+        this.currentVideoFile = null;
+        this.init(); // 修复：使用 init() 而不是 initializeApp()
     }
 
     init() {
@@ -655,50 +659,37 @@ class DroneDetectionApp {
         const status = document.getElementById('statusFilter')?.value || 'all';
         const date = document.getElementById('dateFilter')?.value || '';
 
-        console.log('开始加载历史记录', { filter, status, date });
-
         // 显示加载状态
         this.showHistoryLoadingState();
 
         try {
-            // 构建请求URL
             const url = `${this.apiBaseUrl}/data/history?filter=${filter}&status=${status}&date=${date}`;
-            console.log('请求URL:', url);
-
             const response = await fetch(url);
-            console.log('响应状态:', response.status, response.statusText);
-
             let historyData = [];
 
             if (response.ok) {
                 const result = await response.json();
-                console.log('API返回的原始数据:', result);
 
-                // 安全地提取数据
                 if (result && typeof result === 'object') {
-                    if (Array.isArray(result.data)) {
-                        historyData = result.data;
-                        console.log('成功提取历史数据:', historyData.length, '条记录');
+                    if (result.data !== undefined && result.data !== null) {
+                        if (Array.isArray(result.data)) {
+                            historyData = result.data;
+                        } else {
+                            historyData = [];
+                        }
                     } else if (Array.isArray(result)) {
                         historyData = result;
-                        console.log('数据本身就是数组:', historyData.length, '条记录');
                     } else {
-                        console.warn('API返回的数据格式不符合预期:', result);
                         historyData = [];
                     }
                 } else {
-                    console.error('API返回的不是对象:', result);
                     historyData = [];
                 }
             } else {
-                console.error(`API请求失败: ${response.status} ${response.statusText}`);
-                // 尝试读取错误响应
                 try {
                     const errorData = await response.json();
-                    console.error('错误详情:', errorData);
                     this.showAlert(`加载失败: ${errorData.error || '服务器错误'}`, 'danger');
                 } catch (e) {
-                    console.error('无法解析错误响应');
                     this.showAlert('服务器连接失败，请检查网络连接', 'danger');
                 }
                 historyData = [];
@@ -706,19 +697,14 @@ class DroneDetectionApp {
 
             // 最终数据验证
             if (!Array.isArray(historyData)) {
-                console.error('historyData不是数组，强制转换为空数组', historyData);
                 historyData = [];
             }
 
-            console.log('最终处理的历史数据:', historyData);
             this.displayHistory(historyData);
             this.hideHistoryLoadingState();
 
         } catch (error) {
-            console.error('加载历史记录失败:', error);
             this.hideHistoryLoadingState();
-
-            // 显示错误信息
             this.displayHistory([]);
             this.showAlert('网络连接失败: ' + error.message, 'danger');
         }
@@ -728,16 +714,16 @@ class DroneDetectionApp {
     displayHistory(history) {
         const tbody = document.getElementById('historyTable');
         if (!tbody) {
-            console.error('找不到historyTable元素');
             return;
         }
 
-        console.log('displayHistory接收到的数据:', history);
-
         // 确保history是数组
         if (!Array.isArray(history)) {
-            console.error('displayHistory接收到非数组数据:', typeof history, history);
-            history = [];
+            if (history && typeof history === 'object' && history.data && Array.isArray(history.data)) {
+                history = history.data;
+            } else {
+                history = [];
+            }
         }
 
         if (history.length === 0) {
@@ -754,64 +740,73 @@ class DroneDetectionApp {
         }
 
         let html = '';
-        history.forEach((item, index) => {
-            try {
-                // 数据规范化和验证
-                const safeItem = this.normalizeHistoryItem(item, index);
-                console.log('处理记录:', safeItem);
+        try {
+            history.forEach((item, index) => {
+                try {
+                    const safeItem = this.normalizeHistoryItem(item, index);
+                    const typeIcon = safeItem.type === 'image' ? 'bi-image' : 'bi-camera-video';
+                    const typeName = safeItem.type === 'image' ? '图像检测' : '视频跟踪';
+                    const statusClass = this.getStatusClass(safeItem.status);
+                    const statusText = this.getStatusText(safeItem.status);
 
-                const typeIcon = safeItem.type === 'image' ? 'bi-image' : 'bi-camera-video';
-                const typeName = safeItem.type === 'image' ? '图像检测' : '视频跟踪';
-                const statusClass = this.getStatusClass(safeItem.status);
-                const statusText = this.getStatusText(safeItem.status);
+                    html += `
+                        <tr>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <i class="bi ${typeIcon} me-2 text-primary"></i>
+                                    <span class="fw-medium">${typeName}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="text-truncate" style="max-width: 200px;" title="${safeItem.fileName}">
+                                    ${safeItem.fileName}
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge bg-info">${safeItem.personCount}</span>
+                            </td>
+                            <td>${safeItem.processingTime.toFixed(1)}s</td>
+                            <td>
+                                <span class="status-badge ${statusClass}">${statusText}</span>
+                            </td>
+                            <td>
+                                <small class="text-muted">${safeItem.createdAtStr}</small>
+                            </td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary btn-sm" 
+                                            onclick="viewHistoryDetail('${safeItem.type}', ${safeItem.id})" 
+                                            title="查看详情">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger btn-sm" 
+                                            onclick="deleteHistoryRecord('${safeItem.type}', ${safeItem.id})"
+                                            title="删除">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                } catch (itemError) {
+                    // 静默跳过有问题的数据项
+                }
+            });
 
-                html += `
-                    <tr>
-                        <td>
-                            <div class="d-flex align-items-center">
-                                <i class="bi ${typeIcon} me-2 text-primary"></i>
-                                <span class="fw-medium">${typeName}</span>
-                            </div>
-                        </td>
-                        <td>
-                            <div class="text-truncate" style="max-width: 200px;" title="${safeItem.fileName}">
-                                ${safeItem.fileName}
-                            </div>
-                        </td>
-                        <td>
-                            <span class="badge bg-info">${safeItem.personCount}</span>
-                        </td>
-                        <td>${safeItem.processingTime.toFixed(1)}s</td>
-                        <td>
-                            <span class="status-badge ${statusClass}">${statusText}</span>
-                        </td>
-                        <td>
-                            <small class="text-muted">${safeItem.createdAtStr}</small>
-                        </td>
-                        <td>
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary btn-sm" 
-                                        onclick="viewHistoryDetail('${safeItem.type}', ${safeItem.id})" 
-                                        title="查看详情">
-                                    <i class="bi bi-eye"></i>
-                                </button>
-                                <button class="btn btn-outline-danger btn-sm" 
-                                        onclick="deleteHistoryRecord('${safeItem.type}', ${safeItem.id})"
-                                        title="删除">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                `;
-            } catch (itemError) {
-                console.error('处理历史记录项时出错:', itemError, item);
-                // 跳过有问题的数据项，继续处理下一个
-            }
-        });
+            tbody.innerHTML = html;
 
-        tbody.innerHTML = html;
-        console.log('历史记录表格已更新，显示', history.length, '条记录');
+        } catch (forEachError) {
+            // 显示错误信息
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-4">
+                        <i class="bi bi-exclamation-triangle fs-1 mb-2 text-warning"></i>
+                        <div>数据处理出错</div>
+                        <small class="text-muted">请刷新页面重试</small>
+                    </td>
+                </tr>
+            `;
+        }
     }
 
     // 数据规范化方法
