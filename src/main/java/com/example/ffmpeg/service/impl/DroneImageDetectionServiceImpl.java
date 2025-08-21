@@ -18,6 +18,8 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +32,11 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
     private final QwenApiService qwenApiService;
     private final DatabaseService databaseService;
 
+    private static final Color[] DETECTION_COLORS = {
+            Color.GREEN, Color.BLUE, Color.RED, Color.CYAN,
+            Color.MAGENTA, Color.YELLOW, Color.ORANGE, Color.PINK
+    };
+
     @Override
     public Mono<Map<String, Object>> detectAndVisualizePersons(DroneImageRequest request, String apiKey) {
         long startTime = System.currentTimeMillis();
@@ -37,6 +44,7 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
         return Mono.fromCallable(() -> {
                     log.info("开始检测无人机图片中的人物: {}", request.getImagePath());
 
+                    // 检查文件是否存在
                     Path imagePath = Paths.get(request.getImagePath());
                     if (!Files.exists(imagePath)) {
                         throw new IllegalArgumentException("图片文件不存在: " + request.getImagePath());
@@ -83,6 +91,10 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                     ).map(savedDetection -> {
                         result.put("detectionId", savedDetection.getId());
                         return result;
+                    }).onErrorResume(dbError -> {
+                        log.warn("保存检测结果到数据库失败: {}", dbError.getMessage());
+                        // 数据库保存失败不影响主流程
+                        return Mono.just(result);
                     });
                 });
     }
@@ -101,8 +113,6 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                 Graphics2D g2d = image.createGraphics();
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-                Color[] colors = {Color.GREEN, Color.BLUE, Color.RED, Color.CYAN, Color.MAGENTA, Color.YELLOW};
-
                 for (int i = 0; i < detections.size(); i++) {
                     PersonDetection detection = detections.get(i);
                     double[] bbox = detection.getBbox();
@@ -112,7 +122,7 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                     int x2 = Math.max(x1 + 1, Math.min((int) bbox[2], image.getWidth()));
                     int y2 = Math.max(y1 + 1, Math.min((int) bbox[3], image.getHeight()));
 
-                    Color color = colors[i % colors.length];
+                    Color color = DETECTION_COLORS[i % DETECTION_COLORS.length];
 
                     // 绘制边界框
                     g2d.setColor(color);
@@ -125,9 +135,10 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                     int labelWidth = fm.stringWidth(label);
                     int labelHeight = fm.getHeight();
 
-                    g2d.fillRect(x1, y1 - labelHeight - 10, labelWidth, labelHeight + 10);
+                    g2d.setColor(color);
+                    g2d.fillRect(x1, y1 - labelHeight - 10, labelWidth + 10, labelHeight + 10);
                     g2d.setColor(Color.WHITE);
-                    g2d.drawString(label, x1, y1 - 5);
+                    g2d.drawString(label, x1 + 5, y1 - 5);
 
                     // 绘制中心点
                     int centerX = (x1 + x2) / 2;
@@ -144,16 +155,19 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                 g2d.dispose();
 
                 // 保存结果图片
-                if (request.getOutputPath() != null) {
-                    Path outputPath = Paths.get(request.getOutputPath());
-                    Files.createDirectories(outputPath.getParent());
-                    ImageIO.write(image, "png", new File(request.getOutputPath()));
+                String outputPath = generateOutputPath(request);
+                if (outputPath != null) {
+                    Path outputDir = Paths.get(outputPath).getParent();
+                    if (outputDir != null && !Files.exists(outputDir)) {
+                        Files.createDirectories(outputDir);
+                    }
+                    ImageIO.write(image, "png", new File(outputPath));
                 }
 
                 result.put("success", true);
                 result.put("detections", detections);
                 result.put("totalPersons", detections.size());
-                result.put("outputPath", request.getOutputPath());
+                result.put("outputPath", outputPath);
                 result.put("confidenceThreshold", request.getConfThreshold());
 
             } catch (Exception e) {
@@ -164,5 +178,28 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
 
             return result;
         }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * 生成输出文件路径
+     */
+    private String generateOutputPath(DroneImageRequest request) {
+        if (request.getOutputPath() != null && !request.getOutputPath().isEmpty()) {
+            return request.getOutputPath();
+        }
+
+        // 自动生成输出路径
+        try {
+            Path inputPath = Paths.get(request.getImagePath());
+            String filename = inputPath.getFileName().toString();
+            String nameWithoutExt = filename.contains(".") ?
+                    filename.substring(0, filename.lastIndexOf('.')) : filename;
+
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            return String.format("outputs/%s_detected_%s.png", nameWithoutExt, timestamp);
+        } catch (Exception e) {
+            log.warn("生成输出路径失败: {}", e.getMessage());
+            return null;
+        }
     }
 }
