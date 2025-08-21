@@ -102,27 +102,34 @@
             <artifactId>commons-lang3</artifactId>
         </dependency>
 
-        <!-- ========== JavaCV 一站式平台依赖 - 包含所有contrib模块 ========== -->
+        <!-- ========== 修复: JavaCV 和 OpenCV 依赖配置 ========== -->
 
-        <!-- 关键：使用 javacv-platform 一站式依赖，包含所有模块和平台 -->
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>javacv-platform</artifactId>
-            <version>${javacv.version}</version>
-        </dependency>
-
-        <!-- 可选：如果上面的平台依赖太大，可以使用单独的模块依赖 -->
-        <!--
+        <!-- JavaCV 核心库 -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>javacv</artifactId>
             <version>${javacv.version}</version>
         </dependency>
 
+        <!-- OpenCV 主模块 - 包含跟踪器 -->
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>opencv</artifactId>
+            <version>4.9.0-${javacv.version}</version>
+        </dependency>
+
+        <!-- OpenCV 平台库 (包含所有平台的本地库) -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>opencv-platform</artifactId>
             <version>4.9.0-${javacv.version}</version>
+        </dependency>
+
+        <!-- FFmpeg 用于视频处理 -->
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>ffmpeg</artifactId>
+            <version>6.1.1-${javacv.version}</version>
         </dependency>
 
         <dependency>
@@ -130,7 +137,6 @@
             <artifactId>ffmpeg-platform</artifactId>
             <version>6.1.1-${javacv.version}</version>
         </dependency>
-        -->
 
         <!-- Lombok -->
         <dependency>
