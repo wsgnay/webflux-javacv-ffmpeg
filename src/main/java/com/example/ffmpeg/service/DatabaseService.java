@@ -94,7 +94,6 @@ public class DatabaseService {
                     videoDetection.setModelName((String) config.getOrDefault("model", "qwen2.5-vl-72b-instruct"));
                     videoDetection.setAutoDedupEnabled((Boolean) config.getOrDefault("enableAutoDedup", true));
 
-                    // 修复：使用正确的字段名
                     videoDetection.setTotalFrames(trackingResult.getTotalFrames()); // 修复：使用 getTotalFrames()
                     videoDetection.setProcessedFrames(trackingResult.getTotalFrames()); // 修复：使用 getTotalFrames()
                     videoDetection.setActiveTrackers(trackingResult.getMaxPersonCount()); // 修复：使用 getMaxPersonCount()

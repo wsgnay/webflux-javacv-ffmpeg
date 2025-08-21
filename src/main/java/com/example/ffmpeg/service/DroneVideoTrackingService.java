@@ -1,4 +1,3 @@
-// src/main/java/com/example/ffmpeg/service/DroneVideoTrackingService.java
 package com.example.ffmpeg.service;
 
 import com.example.ffmpeg.dto.*;
@@ -216,7 +215,6 @@ public class DroneVideoTrackingService {
                         if (detections != null && !detections.isEmpty()) {
                             // 为每个检测结果创建跟踪器
                             for (PersonDetection detection : detections) {
-                                // 修复：使用bbox字段而不是getBoundingBox()方法
                                 double[] bbox = detection.getBbox();
                                 if (bbox != null && bbox.length >= 4) {
                                     Rect2d rect2d = new Rect2d(
@@ -285,7 +283,6 @@ public class DroneVideoTrackingService {
             }
 
             stats.setEndTime(LocalDateTime.now());
-            // 修复：设置统计信息
             stats.setTotalFrames(frameCounter.get());
             stats.setActiveTrackers(getActiveTrackerCount(trackers));
             stats.setApiCalls(apiCallCounter.get());
