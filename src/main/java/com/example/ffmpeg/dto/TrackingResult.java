@@ -24,11 +24,17 @@ public class TrackingResult {
     /** 错误信息 */
     private String error;
 
+    /** 消息信息 */
+    private String message;
+
     /** 视频路径 */
     private String videoPath;
 
     /** 输出路径 */
     private String outputPath;
+
+    /** 输出视频路径 */
+    private String outputVideoPath;
 
     /** 处理开始时间 */
     private LocalDateTime startTime;
@@ -65,6 +71,9 @@ public class TrackingResult {
 
     /** 去重操作次数 */
     private int dedupOperations;
+
+    /** 处理结果数据 */
+    private Map<String, Object> result;
 
     /**
      * 跟踪统计信息

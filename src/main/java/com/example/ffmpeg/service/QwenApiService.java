@@ -190,6 +190,15 @@ public class QwenApiService {
     }
 
     /**
+     * 简化的视频帧检测方法（用于DroneVideoTrackingService）
+     */
+    public Mono<List<PersonDetection>> detectPersonsInFrame(BufferedImage frame, String apiKey,
+                                                            double confThreshold, int timeout) {
+        return detectPersonsInFrame(frame, apiKey, "qwen2.5-vl-72b-instruct",
+                1024, confThreshold, timeout, 0);
+    }
+
+    /**
      * 构建API请求体
      */
     private Map<String, Object> buildImageRequestBody(String base64Image, String model, String prompt) {
