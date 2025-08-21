@@ -226,6 +226,88 @@ public class QwenApiService {
         return requestBody;
     }
 
+    // 在 QwenApiService.java 类中添加以下方法
+// 添加到类的末尾，在其他公共方法之后
+
+    /**
+     * 测试API连接
+     */
+    public Mono<Boolean> testConnection(String apiKey, String model) {
+        log.info("开始测试Qwen API连接，模型: {}", model);
+
+        // 创建一个简单的测试请求 - 使用文本模式而不是视觉模式
+        Map<String, Object> testInput = new HashMap<>();
+        testInput.put("prompt", "你好，请回复'测试成功'");
+
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("result_format", "message");
+        parameters.put("max_tokens", 10);
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("input", testInput);
+        requestBody.put("parameters", parameters);
+
+        return webClient.post()
+                .header("Authorization", "Bearer " + apiKey)
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(String.class)
+                .timeout(Duration.ofSeconds(30))
+                .map(response -> {
+                    try {
+                        log.debug("API测试响应: {}", response);
+                        // 尝试解析响应以验证格式正确性
+                        JsonNode root = objectMapper.readTree(response);
+
+                        // 检查是否有错误
+                        if (root.has("code")) {
+                            String errorCode = root.get("code").asText();
+                            String errorMessage = root.path("message").asText("未知错误");
+                            log.warn("API测试失败，错误代码: {}, 错误信息: {}", errorCode, errorMessage);
+                            return false;
+                        }
+
+                        // 检查是否有正常的输出结构
+                        if (root.has("output")) {
+                            JsonNode outputNode = root.get("output");
+                            if (outputNode.has("choices")) {
+                                log.info("API连接测试成功");
+                                return true;
+                            }
+                        }
+
+                        log.warn("API响应格式异常，没有找到预期的结构");
+                        return false;
+
+                    } catch (JsonProcessingException e) {
+                        log.error("解析API测试响应失败: {}", e.getMessage());
+                        return false;
+                    }
+                })
+                .onErrorResume(throwable -> {
+                    log.error("API连接测试失败: {}", throwable.getMessage());
+
+                    // 分析具体的错误类型
+                    String errorMessage = throwable.getMessage();
+                    if (errorMessage != null) {
+                        if (errorMessage.contains("401") || errorMessage.contains("Unauthorized")) {
+                            log.error("API Key无效或已过期");
+                        } else if (errorMessage.contains("timeout") || errorMessage.contains("TimeoutException")) {
+                            log.error("API请求超时，可能是网络问题");
+                        } else if (errorMessage.contains("403") || errorMessage.contains("Forbidden")) {
+                            log.error("API访问被禁止，请检查权限");
+                        } else if (errorMessage.contains("429") || errorMessage.contains("Too Many Requests")) {
+                            log.error("API请求频率过高，请稍后重试");
+                        } else if (errorMessage.contains("500") || errorMessage.contains("Internal Server Error")) {
+                            log.error("API服务器内部错误");
+                        }
+                    }
+
+                    return Mono.just(false);
+                });
+    }
+
     /**
      * 解析检测结果
      */

@@ -12,7 +12,7 @@ spring:
 
   # R2DBC数据库配置 - 针对MySQL 8优化
   r2dbc:
-    url: r2dbc:mysql://localhost:3306/drone_detection?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    url: r2dbc:mysql://localhost:3306/drone_detection?useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: 123456
     pool:

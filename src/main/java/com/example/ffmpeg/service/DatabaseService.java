@@ -94,13 +94,13 @@ public class DatabaseService {
                     videoDetection.setModelName((String) config.getOrDefault("model", "qwen2.5-vl-72b-instruct"));
                     videoDetection.setAutoDedupEnabled((Boolean) config.getOrDefault("enableAutoDedup", true));
 
-                    // 设置结果数据
-                    videoDetection.setTotalFrames(trackingResult.getFrameCount());
-                    videoDetection.setProcessedFrames(trackingResult.getFrameCount());
-                    videoDetection.setActiveTrackers(trackingResult.getActiveTrackers());
-                    videoDetection.setTotalApiCalls(trackingResult.getApiCallsUsed());
+                    // 修复：使用正确的字段名
+                    videoDetection.setTotalFrames(trackingResult.getTotalFrames()); // 修复：使用 getTotalFrames()
+                    videoDetection.setProcessedFrames(trackingResult.getTotalFrames()); // 修复：使用 getTotalFrames()
+                    videoDetection.setActiveTrackers(trackingResult.getMaxPersonCount()); // 修复：使用 getMaxPersonCount()
+                    videoDetection.setTotalApiCalls(trackingResult.getApiCallCount()); // 修复：使用 getApiCallCount()
                     videoDetection.setDedupOperations(trackingResult.getDedupOperations());
-                    videoDetection.setMaxPersonCount(trackingResult.getActiveTrackers()); // 简化处理
+                    videoDetection.setMaxPersonCount(trackingResult.getMaxPersonCount()); // 修复：使用 getMaxPersonCount()
 
                     videoDetection.setStatus(VideoDetection.DetectionStatus.SUCCESS);
                     videoDetection.setProgress(BigDecimal.valueOf(100.0));

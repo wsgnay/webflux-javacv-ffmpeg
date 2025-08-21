@@ -45,9 +45,9 @@
 
         <!-- R2DBC MySQL驱动 -->
         <dependency>
-            <groupId>dev.miku</groupId>
+            <groupId>io.asyncer</groupId>
             <artifactId>r2dbc-mysql</artifactId>
-            <version>0.8.2.RELEASE</version>
+            <version>1.4.1</version>
         </dependency>
 
         <!-- MySQL JDBC驱动 (用于Flyway) -->
