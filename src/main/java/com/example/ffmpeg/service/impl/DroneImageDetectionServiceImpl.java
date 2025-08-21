@@ -77,7 +77,7 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
     private Mono<Map<String, Object>> processDetectionResult(DroneImageRequest request,
                                                              List<PersonDetection> detections,
                                                              long processingTime) {
-        return drawDetections(request, detections)
+        return drawDetections(request, detections, processingTime)  // 传递 processingTime
                 .flatMap(result -> {
                     // 保存到数据库
                     String imageName = Paths.get(request.getImagePath()).getFileName().toString();
@@ -99,11 +99,14 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                 });
     }
 
-    private Mono<Map<String, Object>> drawDetections(DroneImageRequest request, List<PersonDetection> detections) {
+    private Mono<Map<String, Object>> drawDetections(DroneImageRequest request,
+                                                     List<PersonDetection> detections,
+                                                     long processingTime) {
         return Mono.fromCallable(() -> {
             Map<String, Object> result = new HashMap<>();
 
             try {
+                // 读取原始图片
                 BufferedImage image = ImageIO.read(new File(request.getImagePath()));
                 if (image == null) {
                     throw new RuntimeException("无法读取图片: " + request.getImagePath());
@@ -164,6 +167,7 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                     ImageIO.write(image, "png", new File(outputPath));
                 }
 
+                // 转换为Web可访问路径
                 String webPath = null;
                 if (outputPath != null) {
                     webPath = "/" + outputPath; // 简单地在前面加上 "/"
@@ -175,7 +179,7 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                 result.put("outputImagePath", webPath);      // 前端需要的字段名 - Web访问路径
                 result.put("outputPath", outputPath);        // 本地路径（与原有字段兼容）
                 result.put("confidenceThreshold", request.getConfThreshold());
-                result.put("processingTime", System.currentTimeMillis() - startTime); // 如果需要处理时间
+                result.put("processingTime", processingTime); // 使用传递进来的 processingTime
 
             } catch (Exception e) {
                 log.error("绘制检测结果错误: {}", e.getMessage(), e);

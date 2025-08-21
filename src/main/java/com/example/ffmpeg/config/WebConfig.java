@@ -1,18 +1,25 @@
-// 修改你的 src/main/java/com/example/ffmpeg/config/WebConfig.java
+// 修正你的 src/main/java/com/example/ffmpeg/config/WebConfig.java
 package com.example.ffmpeg.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.MediaType;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsWebFilter;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
-import org.springframework.web.reactive.config.ResourceHandlerRegistry;
-import org.springframework.web.reactive.config.WebFluxConfigurer;
+import org.springframework.web.reactive.function.server.RouterFunction;
+import org.springframework.web.reactive.function.server.ServerResponse;
 
+import java.nio.file.Paths;
 import java.util.Arrays;
 
+import static org.springframework.web.reactive.function.server.RouterFunctions.route;
+import static org.springframework.web.reactive.function.server.RequestPredicates.GET;
+
 @Configuration
-public class WebConfig implements WebFluxConfigurer {
+public class WebConfig {
 
     // 保留你原有的CORS配置
     @Bean
@@ -50,22 +57,75 @@ public class WebConfig implements WebFluxConfigurer {
         return new CorsWebFilter(source);
     }
 
-    // 新增：静态资源处理器配置
-    @Override
-    public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // 配置图片输出目录访问
-        registry.addResourceHandler("/outputs/**")
-                .addResourceLocations("file:outputs/")
-                .setCachePeriod(3600);
+    // WebFlux 的静态资源配置 - 使用路由函数
+    @Bean
+    public RouterFunction<ServerResponse> staticResourceRouter() {
+        return route(GET("/outputs/**"), request -> {
+            String path = request.path().substring("/outputs/".length());
+            Resource resource = new FileSystemResource(Paths.get("outputs", path));
 
-        // 配置视频输出目录访问
-        registry.addResourceHandler("/video/**")
-                .addResourceLocations("file:video/")
-                .setCachePeriod(3600);
+            if (resource.exists() && resource.isReadable()) {
+                MediaType mediaType = getMediaType(path);
+                return ServerResponse.ok()
+                        .contentType(mediaType)
+                        .header("Cache-Control", "public, max-age=3600") // 缓存1小时
+                        .bodyValue(resource);
+            }
+            return ServerResponse.notFound().build();
+        })
+                .andRoute(GET("/video/**"), request -> {
+                    String path = request.path().substring("/video/".length());
+                    Resource resource = new FileSystemResource(Paths.get("video", path));
 
-        // 配置上传目录访问
-        registry.addResourceHandler("/uploads/**")
-                .addResourceLocations("file:uploads/")
-                .setCachePeriod(3600);
+                    if (resource.exists() && resource.isReadable()) {
+                        MediaType mediaType = getMediaType(path);
+                        return ServerResponse.ok()
+                                .contentType(mediaType)
+                                .header("Cache-Control", "public, max-age=3600") // 缓存1小时
+                                .bodyValue(resource);
+                    }
+                    return ServerResponse.notFound().build();
+                })
+                .andRoute(GET("/uploads/**"), request -> {
+                    String path = request.path().substring("/uploads/".length());
+                    Resource resource = new FileSystemResource(Paths.get("uploads", path));
+
+                    if (resource.exists() && resource.isReadable()) {
+                        MediaType mediaType = getMediaType(path);
+                        return ServerResponse.ok()
+                                .contentType(mediaType)
+                                .header("Cache-Control", "public, max-age=3600") // 缓存1小时
+                                .bodyValue(resource);
+                    }
+                    return ServerResponse.notFound().build();
+                });
+    }
+
+    // 根据文件扩展名确定MIME类型
+    private MediaType getMediaType(String fileName) {
+        String extension = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase();
+        switch (extension) {
+            case "jpg":
+            case "jpeg":
+                return MediaType.IMAGE_JPEG;
+            case "png":
+                return MediaType.IMAGE_PNG;
+            case "gif":
+                return MediaType.IMAGE_GIF;
+            case "webp":
+                return MediaType.parseMediaType("image/webp");
+            case "mp4":
+                return MediaType.parseMediaType("video/mp4");
+            case "webm":
+                return MediaType.parseMediaType("video/webm");
+            case "avi":
+                return MediaType.parseMediaType("video/x-msvideo");
+            case "mov":
+                return MediaType.parseMediaType("video/quicktime");
+            case "mkv":
+                return MediaType.parseMediaType("video/x-matroska");
+            default:
+                return MediaType.APPLICATION_OCTET_STREAM;
+        }
     }
 }
