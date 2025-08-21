@@ -1,13 +1,19 @@
 // js/app.js - 无人机检测系统前端JavaScript
 
+// class DroneDetectionApp {
+//     constructor() {
+//         this.apiBaseUrl = '/api/drone';
+//         this.currentSection = 'dashboard';
+//         this.settings = this.loadSettingsFromStorage();
+//         this.currentImageFile = null;
+//         this.currentVideoFile = null;
+//         this.init();
+//     }
 class DroneDetectionApp {
     constructor() {
-        this.apiBaseUrl = '/api/drone';
-        this.currentSection = 'dashboard';
-        this.settings = this.loadSettingsFromStorage();
-        this.currentImageFile = null;
-        this.currentVideoFile = null;
-        this.init();
+        this.apiBaseUrl = 'http://localhost:8080/api/drone';
+        this.isDebugMode = true; // 调试模式
+        this.initializeApp();
     }
 
     init() {
@@ -649,70 +655,90 @@ class DroneDetectionApp {
         const status = document.getElementById('statusFilter')?.value || 'all';
         const date = document.getElementById('dateFilter')?.value || '';
 
+        console.log('开始加载历史记录', { filter, status, date });
+
+        // 显示加载状态
+        this.showHistoryLoadingState();
+
         try {
-            // 尝试从API加载真实数据
-            const response = await fetch(`${this.apiBaseUrl}/data/history?filter=${filter}&status=${status}&date=${date}`);
-            let historyData;
+            // 构建请求URL
+            const url = `${this.apiBaseUrl}/data/history?filter=${filter}&status=${status}&date=${date}`;
+            console.log('请求URL:', url);
+
+            const response = await fetch(url);
+            console.log('响应状态:', response.status, response.statusText);
+
+            let historyData = [];
 
             if (response.ok) {
                 const result = await response.json();
-                // 从响应对象中提取data数组
-                historyData = result.data || [];
+                console.log('API返回的原始数据:', result);
+
+                // 安全地提取数据
+                if (result && typeof result === 'object') {
+                    if (Array.isArray(result.data)) {
+                        historyData = result.data;
+                        console.log('成功提取历史数据:', historyData.length, '条记录');
+                    } else if (Array.isArray(result)) {
+                        historyData = result;
+                        console.log('数据本身就是数组:', historyData.length, '条记录');
+                    } else {
+                        console.warn('API返回的数据格式不符合预期:', result);
+                        historyData = [];
+                    }
+                } else {
+                    console.error('API返回的不是对象:', result);
+                    historyData = [];
+                }
             } else {
-                // 如果API不可用，使用模拟数据
-                historyData = await this.fetchHistory(filter, status, date);
+                console.error(`API请求失败: ${response.status} ${response.statusText}`);
+                // 尝试读取错误响应
+                try {
+                    const errorData = await response.json();
+                    console.error('错误详情:', errorData);
+                    this.showAlert(`加载失败: ${errorData.error || '服务器错误'}`, 'danger');
+                } catch (e) {
+                    console.error('无法解析错误响应');
+                    this.showAlert('服务器连接失败，请检查网络连接', 'danger');
+                }
+                historyData = [];
             }
 
+            // 最终数据验证
+            if (!Array.isArray(historyData)) {
+                console.error('historyData不是数组，强制转换为空数组', historyData);
+                historyData = [];
+            }
+
+            console.log('最终处理的历史数据:', historyData);
             this.displayHistory(historyData);
+            this.hideHistoryLoadingState();
+
         } catch (error) {
             console.error('加载历史记录失败:', error);
-            // 使用模拟数据
-            const historyData = await this.fetchHistory(filter, status, date);
-            this.displayHistory(historyData);
+            this.hideHistoryLoadingState();
+
+            // 显示错误信息
+            this.displayHistory([]);
+            this.showAlert('网络连接失败: ' + error.message, 'danger');
         }
     }
 
-    async fetchHistory(filter, status, date) {
-        // 模拟API调用
-        return new Promise(resolve => {
-            setTimeout(() => {
-                const mockData = [
-                    {
-                        id: 1,
-                        type: 'image',
-                        fileName: 'drone_capture_001.jpg',
-                        personCount: 3,
-                        processingTime: 2.5,
-                        status: 'success',
-                        createdAt: '2024-01-15 14:30:22'
-                    },
-                    {
-                        id: 2,
-                        type: 'video',
-                        fileName: 'surveillance_cam.mp4',
-                        personCount: 5,
-                        processingTime: 45.2,
-                        status: 'success',
-                        createdAt: '2024-01-15 13:15:10'
-                    },
-                    {
-                        id: 3,
-                        type: 'image',
-                        fileName: 'aerial_view.png',
-                        personCount: 0,
-                        processingTime: 1.8,
-                        status: 'failed',
-                        createdAt: '2024-01-15 12:45:33'
-                    }
-                ];
-                resolve(mockData);
-            }, 300);
-        });
-    }
-
+    // 增强的 displayHistory 方法
     displayHistory(history) {
         const tbody = document.getElementById('historyTable');
-        if (!tbody) return;
+        if (!tbody) {
+            console.error('找不到historyTable元素');
+            return;
+        }
+
+        console.log('displayHistory接收到的数据:', history);
+
+        // 确保history是数组
+        if (!Array.isArray(history)) {
+            console.error('displayHistory接收到非数组数据:', typeof history, history);
+            history = [];
+        }
 
         if (history.length === 0) {
             tbody.innerHTML = `
@@ -720,6 +746,7 @@ class DroneDetectionApp {
                     <td colspan="7" class="text-center text-muted py-4">
                         <i class="bi bi-inbox fs-1 mb-2"></i>
                         <div>没有找到匹配的记录</div>
+                        <small class="text-muted">请先进行一些图像或视频检测，或调整过滤条件</small>
                     </td>
                 </tr>
             `;
@@ -727,53 +754,193 @@ class DroneDetectionApp {
         }
 
         let html = '';
-        history.forEach(item => {
-            const typeIcon = item.type === 'image' ? 'bi-image' : 'bi-camera-video';
-            const typeName = item.type === 'image' ? '图像检测' : '视频跟踪';
-            const statusClass = item.status === 'success' ? 'status-success' :
-                item.status === 'processing' ? 'status-processing' : 'status-failed';
-            const statusText = item.status === 'success' ? '成功' :
-                item.status === 'processing' ? '处理中' : '失败';
+        history.forEach((item, index) => {
+            try {
+                // 数据规范化和验证
+                const safeItem = this.normalizeHistoryItem(item, index);
+                console.log('处理记录:', safeItem);
 
-            html += `
-                <tr>
-                    <td>
-                        <i class="bi ${typeIcon} me-2"></i>
-                        ${typeName}
-                    </td>
-                    <td>${item.fileName}</td>
-                    <td>
-                        <span class="badge bg-primary">${item.personCount} 人</span>
-                    </td>
-                    <td>${item.processingTime}s</td>
-                    <td>
-                        <span class="status-badge ${statusClass}">${statusText}</span>
-                    </td>
-                    <td>${item.createdAt}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary me-1" onclick="app.viewDetails(${item.id})">
-                            <i class="bi bi-eye"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="app.deleteRecord(${item.id})">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
+                const typeIcon = safeItem.type === 'image' ? 'bi-image' : 'bi-camera-video';
+                const typeName = safeItem.type === 'image' ? '图像检测' : '视频跟踪';
+                const statusClass = this.getStatusClass(safeItem.status);
+                const statusText = this.getStatusText(safeItem.status);
+
+                html += `
+                    <tr>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <i class="bi ${typeIcon} me-2 text-primary"></i>
+                                <span class="fw-medium">${typeName}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="text-truncate" style="max-width: 200px;" title="${safeItem.fileName}">
+                                ${safeItem.fileName}
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge bg-info">${safeItem.personCount}</span>
+                        </td>
+                        <td>${safeItem.processingTime.toFixed(1)}s</td>
+                        <td>
+                            <span class="status-badge ${statusClass}">${statusText}</span>
+                        </td>
+                        <td>
+                            <small class="text-muted">${safeItem.createdAtStr}</small>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-primary btn-sm" 
+                                        onclick="viewHistoryDetail('${safeItem.type}', ${safeItem.id})" 
+                                        title="查看详情">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm" 
+                                        onclick="deleteHistoryRecord('${safeItem.type}', ${safeItem.id})"
+                                        title="删除">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            } catch (itemError) {
+                console.error('处理历史记录项时出错:', itemError, item);
+                // 跳过有问题的数据项，继续处理下一个
+            }
         });
 
         tbody.innerHTML = html;
+        console.log('历史记录表格已更新，显示', history.length, '条记录');
     }
 
-    viewDetails(id) {
-        this.showAlert(`查看记录 ${id} 的详细信息`, 'info');
-    }
+    // 数据规范化方法
+    normalizeHistoryItem(item, index) {
+        const defaultItem = {
+            id: index + 1,
+            type: 'unknown',
+            fileName: '未知文件',
+            personCount: 0,
+            processingTime: 0,
+            status: 'unknown',
+            createdAt: null,
+            createdAtStr: '未知时间'
+        };
 
-    deleteRecord(id) {
-        if (confirm('确定要删除这条记录吗？')) {
-            this.showAlert(`记录 ${id} 已删除`, 'success');
-            this.loadHistory();
+        if (!item || typeof item !== 'object') {
+            console.warn('无效的历史记录项:', item);
+            return defaultItem;
         }
+
+        // 处理时间字段
+        let createdAtStr = '未知时间';
+        if (item.createdAtStr) {
+            createdAtStr = item.createdAtStr;
+        } else if (item.createdAt) {
+            // 如果createdAt是时间戳或ISO字符串，进行转换
+            try {
+                const date = new Date(item.createdAt);
+                if (!isNaN(date.getTime())) {
+                    createdAtStr = date.toLocaleString('zh-CN', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                }
+            } catch (e) {
+                console.warn('时间格式转换失败:', item.createdAt);
+            }
+        }
+
+        return {
+            id: item.id || defaultItem.id,
+            type: item.type || defaultItem.type,
+            fileName: item.fileName || item.name || defaultItem.fileName,
+            personCount: this.safeNumber(item.personCount || item.persons, 0),
+            processingTime: this.safeNumber(item.processingTime, 0),
+            status: item.status || defaultItem.status,
+            createdAt: item.createdAt,
+            createdAtStr: createdAtStr,
+            confidence: this.safeNumber(item.confidence, 0),
+            modelName: item.modelName || '',
+            errorMessage: item.errorMessage || ''
+        };
+    }
+
+    // 安全数字转换
+    safeNumber(value, defaultValue = 0) {
+        if (typeof value === 'number' && !isNaN(value)) {
+            return value;
+        }
+        if (typeof value === 'string') {
+            const parsed = parseFloat(value);
+            if (!isNaN(parsed)) {
+                return parsed;
+            }
+        }
+        return defaultValue;
+    }
+
+    // 获取状态样式类
+    getStatusClass(status) {
+        switch (status?.toLowerCase()) {
+            case 'success':
+                return 'status-success';
+            case 'processing':
+                return 'status-processing';
+            case 'failed':
+            case 'error':
+                return 'status-failed';
+            default:
+                return 'status-unknown';
+        }
+    }
+
+    // 获取状态文本
+    getStatusText(status) {
+        switch (status?.toLowerCase()) {
+            case 'success':
+                return '成功';
+            case 'processing':
+                return '处理中';
+            case 'failed':
+            case 'error':
+                return '失败';
+            default:
+                return '未知';
+        }
+    }
+
+    // 显示历史记录加载状态
+    showHistoryLoadingState() {
+        const tbody = document.getElementById('historyTable');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                        <div class="mt-2">正在加载历史记录...</div>
+                    </td>
+                </tr>
+            `;
+        }
+    }
+
+    // 隐藏历史记录加载状态
+    hideHistoryLoadingState() {
+        // 加载状态会被实际数据替换，所以这里不需要特别处理
+    }
+
+    // 查看历史记录详情
+    viewHistoryDetail(type, id) {
+        console.log('查看详情:', type, id);
+        // TODO: 实现详情查看功能
+        this.showAlert(`查看${type === 'image' ? '图像' : '视频'}检测详情 (ID: ${id})`, 'info');
     }
 
     loadSettings() {
@@ -928,6 +1095,42 @@ class DroneDetectionApp {
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+}
+
+// 全局函数：查看历史记录详情
+function viewHistoryDetail(type, id) {
+    if (window.app) {
+        window.app.viewHistoryDetail(type, id);
+    }
+}
+
+// 全局函数：删除历史记录
+async function deleteHistoryRecord(type, id) {
+    if (!confirm(`确定要删除这条${type === 'image' ? '图像' : '视频'}检测记录吗？`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${window.app.apiBaseUrl}/data/history/${type}/${id}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+                window.app.showAlert('记录删除成功', 'success');
+                // 重新加载历史记录
+                window.app.loadHistory();
+            } else {
+                window.app.showAlert('删除失败: ' + result.error, 'danger');
+            }
+        } else {
+            window.app.showAlert('删除请求失败', 'danger');
+        }
+    } catch (error) {
+        console.error('删除记录失败:', error);
+        window.app.showAlert('删除失败: ' + error.message, 'danger');
     }
 }
 
