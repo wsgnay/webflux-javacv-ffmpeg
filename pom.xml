@@ -11,8 +11,8 @@
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <name>Drone Inspection System</name>
-    <description>AI检测分析系统</description>
+    <n>Drone Inspection System</n>
+    <description>AI检测分析系统 - 支持OpenCV内置跟踪器</description>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
@@ -22,7 +22,7 @@
         <spring.boot.version>2.7.18</spring.boot.version>
     </properties>
 
-    <!-- 重要：添加Spring Boot的依赖管理 -->
+    <!-- Spring Boot依赖管理 -->
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -102,7 +102,9 @@
             <artifactId>commons-lang3</artifactId>
         </dependency>
 
-        <!-- JavaCV 核心（无平台依赖） -->
+        <!-- ========== JavaCV 和 OpenCV - 包含跟踪器支持 ========== -->
+
+        <!-- JavaCV 核心 -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>javacv</artifactId>
@@ -123,14 +125,13 @@
             <classifier>windows-x86_64</classifier>
         </dependency>
 
-        <!-- FFmpeg 核心 -->
+        <!-- FFmpeg -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>ffmpeg</artifactId>
             <version>6.0-${javacv.version}</version>
         </dependency>
 
-        <!-- FFmpeg Windows x86_64 平台 -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>ffmpeg</artifactId>
@@ -138,14 +139,14 @@
             <classifier>windows-x86_64</classifier>
         </dependency>
 
-        <!-- OpenCV 核心 -->
+        <!-- ========== OpenCV 核心 + 跟踪器支持 ========== -->
+        <!-- OpenCV 核心模块 -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>opencv</artifactId>
             <version>4.7.0-${javacv.version}</version>
         </dependency>
 
-        <!-- OpenCV Windows x86_64 平台 -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>opencv</artifactId>
@@ -153,7 +154,11 @@
             <classifier>windows-x86_64</classifier>
         </dependency>
 
-        <!-- OpenBLAS 核心 -->
+        <!-- 关键：OpenCV Contrib 模块（包含跟踪器） -->
+        <!-- 注意：JavaCV 1.5.9 对应 OpenCV 4.7.0，跟踪器包含在主包中 -->
+        <!-- 如果需要额外的跟踪器，可能需要使用 opencv-contrib -->
+
+        <!-- OpenBLAS -->
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>openblas</artifactId>
@@ -166,9 +171,6 @@
             <version>0.3.23-${javacv.version}</version>
             <classifier>windows-x86_64</classifier>
         </dependency>
-
-        <!-- 注意：移除所有显式的 reactor-core 和 reactor-netty 依赖 -->
-        <!-- Spring Boot 会自动管理这些依赖的兼容版本 -->
 
         <!-- Lombok -->
         <dependency>
@@ -253,26 +255,6 @@
                     <encoding>UTF-8</encoding>
                     <baselineOnMigrate>true</baselineOnMigrate>
                     <validateOnMigrate>true</validateOnMigrate>
-                </configuration>
-            </plugin>
-
-            <!-- Maven资源插件 -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-resources-plugin</artifactId>
-                <version>3.3.1</version>
-                <configuration>
-                    <encoding>UTF-8</encoding>
-                </configuration>
-            </plugin>
-
-            <!-- Surefire测试插件 -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.0.0</version>
-                <configuration>
-                    <useSystemClassLoader>false</useSystemClassLoader>
                 </configuration>
             </plugin>
         </plugins>
