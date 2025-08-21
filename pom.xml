@@ -11,14 +11,14 @@
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <n>Drone Inspection System</n>
-    <description>AI检测分析系统 - 支持OpenCV内置跟踪器</description>
+    <name>Drone Inspection System</name>
+    <description>AI检测分析系统 - 支持OpenCV内置跟踪器(包含contrib模块)</description>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <javacv.version>1.5.9</javacv.version>
+        <javacv.version>1.5.10</javacv.version>
         <spring.boot.version>2.7.18</spring.boot.version>
     </properties>
 
@@ -102,75 +102,35 @@
             <artifactId>commons-lang3</artifactId>
         </dependency>
 
-        <!-- ========== JavaCV 和 OpenCV - 包含跟踪器支持 ========== -->
+        <!-- ========== JavaCV 一站式平台依赖 - 包含所有contrib模块 ========== -->
 
-        <!-- JavaCV 核心 -->
+        <!-- 关键：使用 javacv-platform 一站式依赖，包含所有模块和平台 -->
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>javacv-platform</artifactId>
+            <version>${javacv.version}</version>
+        </dependency>
+
+        <!-- 可选：如果上面的平台依赖太大，可以使用单独的模块依赖 -->
+        <!--
         <dependency>
             <groupId>org.bytedeco</groupId>
             <artifactId>javacv</artifactId>
             <version>${javacv.version}</version>
         </dependency>
 
-        <!-- JavaCPP 核心依赖 -->
         <dependency>
             <groupId>org.bytedeco</groupId>
-            <artifactId>javacpp</artifactId>
-            <version>${javacv.version}</version>
+            <artifactId>opencv-platform</artifactId>
+            <version>4.9.0-${javacv.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.bytedeco</groupId>
-            <artifactId>javacpp</artifactId>
-            <version>${javacv.version}</version>
-            <classifier>windows-x86_64</classifier>
+            <artifactId>ffmpeg-platform</artifactId>
+            <version>6.1.1-${javacv.version}</version>
         </dependency>
-
-        <!-- FFmpeg -->
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>ffmpeg</artifactId>
-            <version>6.0-${javacv.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>ffmpeg</artifactId>
-            <version>6.0-${javacv.version}</version>
-            <classifier>windows-x86_64</classifier>
-        </dependency>
-
-        <!-- ========== OpenCV 核心 + 跟踪器支持 ========== -->
-        <!-- OpenCV 核心模块 -->
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>opencv</artifactId>
-            <version>4.7.0-${javacv.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>opencv</artifactId>
-            <version>4.7.0-${javacv.version}</version>
-            <classifier>windows-x86_64</classifier>
-        </dependency>
-
-        <!-- 关键：OpenCV Contrib 模块（包含跟踪器） -->
-        <!-- 注意：JavaCV 1.5.9 对应 OpenCV 4.7.0，跟踪器包含在主包中 -->
-        <!-- 如果需要额外的跟踪器，可能需要使用 opencv-contrib -->
-
-        <!-- OpenBLAS -->
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>openblas</artifactId>
-            <version>0.3.23-${javacv.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>openblas</artifactId>
-            <version>0.3.23-${javacv.version}</version>
-            <classifier>windows-x86_64</classifier>
-        </dependency>
+        -->
 
         <!-- Lombok -->
         <dependency>

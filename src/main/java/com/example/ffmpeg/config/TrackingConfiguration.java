@@ -23,7 +23,7 @@ public class TrackingConfiguration {
     @Bean
     public CommandLineRunner trackingSetup() {
         return args -> {
-            log.info("🚀 初始化无人机跟踪系统...");
+            log.info("初始化无人机目标跟踪...");
 
             try {
                 // 测试跟踪器可用性
@@ -31,7 +31,7 @@ public class TrackingConfiguration {
 
                 // 获取推荐的跟踪器
                 String recommendedTracker = trackerTest.getRecommendedTracker();
-                log.info("🎯 系统将使用跟踪器: {}", recommendedTracker);
+                log.info("系统将使用跟踪器: {}", recommendedTracker);
 
                 // 设置系统属性，供其他组件使用
                 System.setProperty("drone.tracking.recommended", recommendedTracker);
