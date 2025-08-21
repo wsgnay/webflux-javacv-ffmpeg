@@ -296,8 +296,14 @@ public class DroneVideoTrackingService {
 
             return TrackingResult.builder()
                     .success(true)
-                    .outputVideoPath(outputPath)
-                    .stats(stats) // 修复：使用正确的字段名
+                    .outputVideoPath("/" + outputPath)  // 转换为Web访问路径
+                    .outputPath(outputPath)             // 这个字段存在，用于本地路径
+                    .totalFrames(stats.getTotalFrames())
+                    .maxPersonCount(stats.getMaxPersonCount())
+                    .apiCallCount(stats.getApiCalls())
+                    .dedupOperations(stats.getDedupCount())  // 使用正确的方法名 getDedupCount()
+                    .processingTimeMs(stats.getProcessingTimeMs())
+                    .stats(stats)
                     .build();
 
         } finally {
@@ -497,12 +503,13 @@ public class DroneVideoTrackingService {
             TrackingResult trackingResult = TrackingResult.builder()
                     .success(true)
                     .videoPath(request.getVideoSource())
-                    .outputPath(outputPath)
-                    .totalFrames(stats.getTotalFrames()) // 对应 DatabaseService 中的 getTotalFrames()
-                    .maxPersonCount(stats.getActiveTrackers()) // 对应 DatabaseService 中的 getMaxPersonCount()
-                    .apiCallCount(stats.getApiCalls()) // 对应 DatabaseService 中的 getApiCallCount()
-                    .dedupOperations(stats.getDedupCount()) // 对应 DatabaseService 中的 getDedupOperations()
-                    .processingTimeMs(java.time.Duration.between(stats.getStartTime(), stats.getEndTime()).toMillis())
+                    .outputVideoPath("/" + outputPath)  // Web访问路径
+                    .outputPath(outputPath)             // 本地路径
+                    .totalFrames(stats.getTotalFrames())
+                    .maxPersonCount(stats.getMaxPersonCount())
+                    .apiCallCount(stats.getApiCalls())
+                    .dedupOperations(stats.getDedupCount())  // 使用正确的方法名
+                    .processingTimeMs(stats.getProcessingTimeMs())
                     .startTime(stats.getStartTime())
                     .endTime(stats.getEndTime())
                     .stats(stats)
@@ -528,7 +535,7 @@ public class DroneVideoTrackingService {
             databaseService.saveVideoDetection(
                     request.getVideoSource(),
                     videoName,
-                    trackingResult, // 直接使用 trackingResult，不需要适配器
+                    trackingResult,
                     config
             ).subscribe(
                     result -> log.info("视频检测结果已保存到数据库"),

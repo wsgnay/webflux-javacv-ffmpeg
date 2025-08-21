@@ -18,4 +18,5 @@ public interface DroneImageDetectionService {
      * @return 检测结果
      */
     Mono<Map<String, Object>> detectAndVisualizePersons(DroneImageRequest request, String apiKey);
+
 }

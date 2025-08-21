@@ -164,11 +164,18 @@ public class DroneImageDetectionServiceImpl implements DroneImageDetectionServic
                     ImageIO.write(image, "png", new File(outputPath));
                 }
 
+                String webPath = null;
+                if (outputPath != null) {
+                    webPath = "/" + outputPath; // 简单地在前面加上 "/"
+                }
+
                 result.put("success", true);
                 result.put("detections", detections);
                 result.put("totalPersons", detections.size());
-                result.put("outputPath", outputPath);
+                result.put("outputImagePath", webPath);      // 前端需要的字段名 - Web访问路径
+                result.put("outputPath", outputPath);        // 本地路径（与原有字段兼容）
                 result.put("confidenceThreshold", request.getConfThreshold());
+                result.put("processingTime", System.currentTimeMillis() - startTime); // 如果需要处理时间
 
             } catch (Exception e) {
                 log.error("绘制检测结果错误: {}", e.getMessage(), e);

@@ -365,38 +365,58 @@ class DroneDetectionApp {
         if (result.success) {
             const detections = result.detections || [];
             let html = `
-                <div class="alert alert-success">
-                    <i class="bi bi-check-circle me-2"></i>
-                    检测完成！发现 <strong>${result.totalPersons || 0}</strong> 个人物
-                </div>
-            `;
+            <div class="alert alert-success">
+                <i class="bi bi-check-circle me-2"></i>
+                检测完成！发现 <strong>${result.totalPersons || 0}</strong> 个人物
+            </div>
+        `;
 
+            // 显示检测详情
             if (detections.length > 0) {
-                html += '<div class="detection-result">';
+                html += '<div class="detection-summary mb-3">';
+                html += '<h6><i class="bi bi-list-check me-2"></i>检测详情</h6>';
                 detections.forEach((detection, index) => {
                     html += `
-                        <div class="detection-item">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <span><i class="bi bi-person-fill me-2"></i>人物 ${index + 1}</span>
-                                <span class="badge bg-success">${(detection.confidence * 100).toFixed(1)}%</span>
-                            </div>
-                            <small class="text-muted">
-                                位置: [${detection.bbox.map(b => b.toFixed(0)).join(', ')}]
-                            </small>
-                        </div>
-                    `;
+                    <div class="detection-item d-flex justify-content-between align-items-center mb-2 p-2 bg-light rounded">
+                        <span><i class="bi bi-person-fill me-2 text-primary"></i>人物 ${index + 1}</span>
+                        <span class="badge bg-success">${(detection.confidence * 100).toFixed(1)}%</span>
+                    </div>
+                `;
                 });
                 html += '</div>';
             }
 
-            // 添加输出图片显示
+            // 显示处理后的图片 - 使用 outputImagePath 字段
             if (result.outputImagePath) {
                 html += `
-                    <div class="mt-3">
-                        <h6>检测结果:</h6>
-                        <img src="${result.outputImagePath}" class="img-fluid rounded" alt="检测结果">
+                <div class="mt-3">
+                    <h6><i class="bi bi-image me-2"></i>检测结果图片</h6>
+                    <div class="text-center">
+                        <img src="${result.outputImagePath}" 
+                             class="img-fluid rounded shadow-sm" 
+                             alt="检测结果图片"
+                             style="max-height: 500px; cursor: pointer;"
+                             onclick="viewImageFullscreen('${result.outputImagePath}')"
+                             onerror="handleImageError(this, '${result.outputImagePath}')">
+                        <div class="mt-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="downloadImage('${result.outputImagePath}')">
+                                <i class="bi bi-download me-1"></i>下载图片
+                            </button>
+                        </div>
                     </div>
-                `;
+                </div>
+            `;
+            }
+
+            // 显示处理信息
+            if (result.processingTime) {
+                html += `
+                <div class="mt-3 p-2 bg-light rounded">
+                    <small class="text-muted">
+                        <i class="bi bi-clock me-1"></i>处理时间: ${result.processingTime}ms
+                    </small>
+                </div>
+            `;
             }
 
             imageResult.innerHTML = html;
@@ -405,58 +425,109 @@ class DroneDetectionApp {
         }
     }
 
+
     displayVideoResult(result) {
         const videoResult = document.getElementById('videoResult');
         if (!videoResult) return;
 
-        if (result.success && result.result) {
-            const data = result.result;
-            const html = `
-                <div class="alert alert-success">
-                    <i class="bi bi-check-circle me-2"></i>
-                    跟踪完成！
-                </div>
-                <div class="row text-center">
-                    <div class="col-6 mb-3">
-                        <div class="bg-light p-3 rounded">
-                            <h4 class="text-primary mb-1">${data.frameCount || 0}</h4>
-                            <small class="text-muted">处理帧数</small>
-                        </div>
-                    </div>
-                    <div class="col-6 mb-3">
-                        <div class="bg-light p-3 rounded">
-                            <h4 class="text-success mb-1">${data.activeTrackers || 0}</h4>
-                            <small class="text-muted">活跃跟踪器</small>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="bg-light p-3 rounded">
-                            <h4 class="text-warning mb-1">${data.apiCallsUsed || 0}</h4>
-                            <small class="text-muted">API调用</small>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="bg-light p-3 rounded">
-                            <h4 class="text-info mb-1">${data.dedupOperations || 0}</h4>
-                            <small class="text-muted">去重操作</small>
+        if (result.success) {
+            // 数据可能在 result 或 result.result 中
+            const data = result.result || result;
+
+            let html = `
+            <div class="alert alert-success">
+                <i class="bi bi-check-circle me-2"></i>
+                视频跟踪完成！
+            </div>
+        `;
+
+            // 统计信息卡片 - 使用实际的字段名
+            html += `
+            <div class="row text-center mb-3">
+                <div class="col-md-3 col-6 mb-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <h5>${result.totalFrames || data.totalFrames || 0}</h5>
+                            <small>总帧数</small>
                         </div>
                     </div>
                 </div>
-                ${data.outputVideoPath ? `
-                    <div class="mt-3">
-                        <h6>输出视频:</h6>
-                        <video controls class="w-100 rounded">
-                            <source src="${data.outputVideoPath}" type="video/mp4">
+                <div class="col-md-3 col-6 mb-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <h5>${result.maxPersonCount || data.maxPersonCount || 0}</h5>
+                            <small>最大人数</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6 mb-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body">
+                            <h5>${result.apiCallCount || data.apiCallCount || 0}</h5>
+                            <small>API调用</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6 mb-3">
+                    <div class="card bg-info text-white">
+                        <div class="card-body">
+                            <h5>${result.dedupOperations || data.dedupOperations || 0}</h5>
+                            <small>去重操作</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+            // 显示处理后的视频 - 使用 outputVideoPath 字段
+            const videoPath = result.outputVideoPath || data.outputVideoPath;
+            if (videoPath) {
+                html += `
+                <div class="mt-3">
+                    <h6><i class="bi bi-play-circle me-2"></i>跟踪结果视频</h6>
+                    <div class="text-center">
+                        <video controls 
+                               class="w-100 rounded shadow-sm" 
+                               style="max-height: 500px;"
+                               onloadstart="this.volume=0.3"
+                               onerror="handleVideoError(this, '${videoPath}')">
+                            <source src="${videoPath}" type="video/mp4">
                             您的浏览器不支持视频播放。
                         </video>
+                        <div class="mt-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="downloadVideo('${videoPath}')">
+                                <i class="bi bi-download me-1"></i>下载视频
+                            </button>
+                        </div>
                     </div>
-                ` : ''}
+                </div>
             `;
+            } else {
+                html += `
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>
+                    跟踪完成，但未生成输出视频文件
+                </div>
+            `;
+            }
+
+            // 显示处理时间信息
+            if (result.processingTimeMs) {
+                html += `
+                <div class="mt-3 p-2 bg-light rounded">
+                    <small class="text-muted">
+                        <i class="bi bi-clock me-1"></i>处理时间: ${(result.processingTimeMs / 1000).toFixed(2)}s
+                    </small>
+                </div>
+            `;
+            }
+
             videoResult.innerHTML = html;
         } else {
             this.showAlert(result.error || '跟踪失败', 'danger');
         }
     }
+
 
     simulateUploadProgress(type, start, end, duration) {
         const startTime = Date.now();
@@ -1167,6 +1238,50 @@ function loadHistory() {
     if (window.app) {
         window.app.loadHistory();
     }
+}
+// 工具函数
+function handleImageError(img, imagePath) {
+    console.log('图片加载失败:', imagePath);
+    img.style.display = 'none';
+    img.insertAdjacentHTML('afterend', `
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            图片加载失败，请检查文件路径: ${imagePath}
+        </div>
+    `);
+}
+
+function handleVideoError(video, videoPath) {
+    console.log('视频加载失败:', videoPath);
+    video.style.display = 'none';
+    video.insertAdjacentHTML('afterend', `
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            视频加载失败，请检查文件路径: ${videoPath}
+        </div>
+    `);
+}
+
+function downloadImage(imagePath) {
+    const link = document.createElement('a');
+    link.href = imagePath;
+    link.download = 'detection_result.png';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function downloadVideo(videoPath) {
+    const link = document.createElement('a');
+    link.href = videoPath;
+    link.download = 'tracking_result.mp4';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function viewImageFullscreen(imagePath) {
+    window.open(imagePath, '_blank');
 }
 
 // 初始化应用
