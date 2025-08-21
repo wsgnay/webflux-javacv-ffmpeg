@@ -446,7 +446,7 @@ public class DroneVideoTrackingService {
         trackerInfo.lastUpdateFrame = currentFrame;
         trackerInfo.confidence = Math.max(0.1, trackerInfo.confidence * 0.995);
 
-        log.debug("✅ 跟踪器 #{} ({}) 更新成功: ({:.0f},{:.0f},{:.0f},{:.0f})",
+        log.debug("跟踪器 #{} ({}) 更新成功: ({:.0f},{:.0f},{:.0f},{:.0f})",
                 trackerInfo.id, trackerInfo.trackerType,
                 bbox.x(), bbox.y(), bbox.width(), bbox.height());
     }

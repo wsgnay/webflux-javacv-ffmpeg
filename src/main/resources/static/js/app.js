@@ -231,6 +231,7 @@ class DroneDetectionApp {
         try {
             this.showProgress('image', true);
             this.updateProgress('image', 10);
+            this.addLog('开始图像检测...', 'info'); // 添加日志
 
             // 模拟上传进度
             this.simulateUploadProgress('image', 10, 50, 2000);
@@ -249,6 +250,7 @@ class DroneDetectionApp {
             request.imagePath = uploadResult.filePath;
 
             this.updateProgress('image', 60);
+            this.addLog('图像上传完成，开始AI检测...', 'info'); // 添加日志
 
             // 然后进行检测
             const response = await fetch(`${this.apiBaseUrl}/image/detect`, {
@@ -268,6 +270,7 @@ class DroneDetectionApp {
 
             const result = await response.json();
             this.updateProgress('image', 100);
+            this.addLog('图像检测完成', 'success'); // 添加日志
 
             setTimeout(() => {
                 this.showProgress('image', false);
@@ -278,7 +281,7 @@ class DroneDetectionApp {
         } catch (error) {
             this.showProgress('image', false);
             this.showAlert(`检测失败: ${error.message}`, 'danger');
-            this.addLog(`图像检测失败: ${error.message}`, 'error');
+            this.addLog(`图像检测失败: ${error.message}`, 'error'); // 添加错误日志
         }
     }
 
@@ -596,8 +599,9 @@ class DroneDetectionApp {
     }
 
     addLog(message, type = 'info') {
-        const logContainer = document.getElementById('logContainer');
-        if (!logContainer) return;
+        // 同时更新图像和视频日志容器
+        const logContainers = document.querySelectorAll('#logContainer, #imageLogContainer');
+        if (!logContainers.length) return;
 
         const timestamp = new Date().toLocaleTimeString();
         const logClass = type === 'success' ? 'log-success' :
@@ -608,13 +612,15 @@ class DroneDetectionApp {
         logEntry.className = `log-entry ${logClass}`;
         logEntry.textContent = `[${timestamp}] ${message}`;
 
-        logContainer.appendChild(logEntry);
-        logContainer.scrollTop = logContainer.scrollHeight;
+        logContainers.forEach(logContainer => {
+            logContainer.appendChild(logEntry.cloneNode(true));
+            logContainer.scrollTop = logContainer.scrollHeight;
 
-        // 限制日志条数
-        if (logContainer.children.length > 100) {
-            logContainer.removeChild(logContainer.firstChild);
-        }
+            // 限制日志条数
+            if (logContainer.children.length > 100) {
+                logContainer.removeChild(logContainer.firstChild);
+            }
+        });
     }
 
     async loadDashboard() {
